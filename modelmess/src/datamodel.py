@@ -209,7 +209,7 @@ class SDRFRow(BaseModel):
         d = self.model_dump()
 
         # Convert list of objects → string
-        d.get("Modifications",None):
+        if d.get("Modifications", None):
             d["Modifications"] = ";".join(
                 str(m) for m in d["Modifications"]
             )
