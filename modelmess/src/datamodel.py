@@ -186,19 +186,19 @@ class SDRFRow(BaseModel):
 
 
     # ── Validators ───────────────────────────────────────────────────────────
-    @field_validator('organism')
+    @field_validator('Organism')
     @classmethod
     def normalise_organism(cls, v):
         return _norm_organism(v)
 
-    @field_validator('label')
+    @field_validator('Label')
     @classmethod
     def normalise_label(cls, v):
         if re.search(r'label.?free', v, re.I):
             return LABEL_FREE
         return v
 
-    @field_validator('usage')
+    @field_validator('Usage')
     @classmethod
     def normalise_usage(cls, v):
         if v not in ('Raw Data File', 'Spectrum Library'):
@@ -229,8 +229,8 @@ class SDRFRow(BaseModel):
 
 class SDRFExperiment(BaseModel):
     """All rows extracted from one publication."""
-    pxd  : str = Field(description="ProteomeXchange ID, e.g. PXD000070")
-    rows : List[SDRFRow]  = Field(default_factory=list)
+    pxd : str = Field(description="ProteomeXchange ID, e.g. PXD000070")
+    rows: List[SDRFRow]  = Field(default_factory=list)
 
 
 
