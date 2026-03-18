@@ -146,7 +146,7 @@ class SDRFRow(BaseModel):
 
 
     # ── Comment / MS Technical ────────────────────────────────────────────────
-    Label : str            = Field(default=LABEL_FREE)
+    comment_Label : str   = Field(default=LABEL_FREE)
     comment_AcquisitionMethod: Optional[str]  = None
     comment_CollisionEnergy: Optional[str]  = None
     comment_EnrichmentMethod: Optional[str]  = None
@@ -195,15 +195,36 @@ class SDRFRow(BaseModel):
     @classmethod
     def normalise_label(cls, v):
         if re.search(r'label.?free', v, re.I):
- return LABEL_FREE
+            return LABEL_FREE
         return v
 
     @field_validator('usage')
     @classmethod
     def normalise_usage(cls, v):
         if v not in ('Raw Data File', 'Spectrum Library'):
- return 'Raw Data File'
+            return 'Raw Data File'
         return v
+    
+    def serialize_row(self: SDRFRow) -> dict:
+        d = self.model_dump()
+
+        # Convert list of objects → string
+        d.get("Modifications",None):
+            d["Modifications"] = ";".join(
+                str(m) for m in d["Modifications"]
+            )
+        else:
+            d["Modifications"] = None
+
+        # Convert instrument object
+        if d.get("comment_Instrument"):
+            d["comment_Instrument"] = str(d["comment_Instrument"])
+
+        # Convert CleavageAgent if object
+        if d.get("CleavageAgent"):
+            d["CleavageAgent"] = str(d["CleavageAgent"])
+
+        return d    
 
 
 class SDRFExperiment(BaseModel):
@@ -212,4 +233,4 @@ class SDRFExperiment(BaseModel):
     rows : List[SDRFRow]  = Field(default_factory=list)
 
 
-print("Pydantic models loaded.")
+
