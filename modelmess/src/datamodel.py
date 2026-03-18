@@ -92,62 +92,98 @@ class SDRFRow(BaseModel):
     """
 
     # ── Identifiers ──────────────────────────────────────────────────────────
-    source_name       : str  = Field(description="Unique sample name, e.g. 'Sample 1'")
+    SourceName       : str  = Field(description="Unique sample name, e.g. 'Sample 1'")
     raw_data_file     : str  = Field(description="Raw file name, e.g. file01.raw")
-    assay_name        : str  = Field(description="Run identifier, e.g. 'run 1'")
-    usage             : str  = Field(default='Raw Data File')
+    AssayName        : str  = Field(description="Run identifier, e.g. 'run 1'")
+    Usage  : str  = Field(default='Raw Data File')
 
     # ── Characteristics ───────────────────────────────────────────────────────
-    organism              : str           = Field(description="Latin name, e.g. Homo sapiens")
-    organism_part         : Optional[str] = None
-    cell_type             : Optional[str] = None
-    cell_line             : Optional[str] = None
-    disease               : Optional[str] = None
-    biological_replicate  : Optional[int] = None
-    technical_replicate   : Optional[int] = None
-    sex                   : Optional[str] = None
-    age                   : Optional[str] = None
-    developmental_stage   : Optional[str] = None
-    strain                : Optional[str] = None
-    genotype              : Optional[str] = None
-    genetic_modification  : Optional[str] = None
-    phenotype             : Optional[str] = None
-    compound              : Optional[str] = None
-    concentration_compound: Optional[str] = None
-    treatment             : Optional[str] = None
-    disease_treatment     : Optional[str] = None
-    material_type         : Optional[str] = None
-    pooled_sample         : Optional[str] = None
-    specimen              : Optional[str] = None
+    Age: Optional[str] = None
+    AlkylationReagent: Optional[str] = None
+    AnatomicSiteTumor: Optional[str] = None
+    AncestryCategory: Optional[str] = None
+    BMI: Optional[str] = None
+    Bait: Optional[str] = None
+    BiologicalReplicate: Optional[str] = None
+    CellLine: Optional[str] = None
+    CellPart: Optional[str] = None
+    CellType: Optional[str] = None
+    CleavageAgent: Optional[str] = None
+    Compound: Optional[str] = None
+    ConcentrationOfCompound: Optional[str] = None
+    Depletion: Optional[str] = None
+    DevelopmentalStage: Optional[str] = None
+    DiseaseTreatment: Optional[str] = None
+    Disease: Optional[str] = None
+    GeneticModification: Optional[str] = None
+    Genotype: Optional[str] = None
+    GrowthRate: Optional[str] = None
+    Label: Optional[str] = None
+    MaterialType: Optional[str] = None
+    NumberOfBiologicalReplicates: Optional[str] = None
+    NumberOfSamples: Optional[str] = None
+    NumberOfTechnicalReplicates: Optional[str] = None
+    OrganismPart: Optional[str] = None
+    Organism: Optional[str] = None
+    OriginSiteDisease: Optional[str] = None
+    PooledSample: Optional[str] = None
+    ReductionReagent: Optional[str] = None
+    SamplingTime: Optional[str] = None
+    Sex: Optional[str] = None
+    Specimen: Optional[str] = None
+    SpikedCompound: Optional[str] = None
+    Staining: Optional[str] = None
+    Strain: Optional[str] = None
+    SyntheticPeptide: Optional[str] = None
+    Temperature: Optional[str] = None
+    Time: Optional[str] = None
+    Treatment: Optional[str] = None
+    TumorCellularity: Optional[str] = None
+    TumorGrade: Optional[str] = None
+    TumorSite: Optional[str] = None
+    TumorSize: Optional[str] = None
+    TumorStage: Optional[str] = None
+
 
     # ── Comment / MS Technical ────────────────────────────────────────────────
-    label                   : str                       = Field(default=LABEL_FREE)
-    fraction_identifier     : Optional[int]             = 1
-    instrument              : Optional[InstrumentRef]   = None
-    fragmentation_method    : Optional[str]             = None   # e.g. CID, ETD, HCD
-    ms2_mass_analyzer       : Optional[str]             = None
-    acquisition_method      : Optional[str]             = None   # DDA or DIA
-    ionization_type         : Optional[str]             = None   # ESI, MALDI
-    enrichment_method       : Optional[str]             = None
-    fractionation_method    : Optional[str]             = None
-    separation              : Optional[str]             = None
-    gradient_time           : Optional[str]             = None
-    flow_rate               : Optional[str]             = None
-    precursor_mass_tolerance: Optional[str]             = None   # e.g. '10 ppm'
-    fragment_mass_tolerance : Optional[str]             = None   # e.g. '0.02 Da'
-    number_of_missed_cleavages: Optional[int]           = None
-    number_of_fractions     : Optional[int]             = None
-    collision_energy        : Optional[str]             = None
+    Label : str            = Field(default=LABEL_FREE)
+    comment_AcquisitionMethod: Optional[str]  = None
+    comment_CollisionEnergy: Optional[str]  = None
+    comment_EnrichmentMethod: Optional[str]  = None
+    comment_FlowRateChromatogram: Optional[str]  = None
+    comment_FractionIdentifier: Optional[int]  = 1
+    comment_FractionationMethod: Optional[str]  = None
+    comment_FragmentMassTolerance: Optional[str]  = None
+    comment_FragmentationMethod: Optional[str]  = None
+    comment_GradientTime: Optional[str]  = None
+    comment_Instrument: Optional[InstrumentRef]   = None
+    comment_IonizationType: Optional[str]  = None
+    comment_MS2MassAnalyzer: Optional[str]  = None
+    comment_NumberOfFractions: Optional[str]  = None
+    comment_NumberOfMissedCleavages: Optional[str]  = None
+    comment_PrecursorMassTolerance: Optional[str]  = None
+    comment_Separation: Optional[str]  = None
 
     # ── Modifications + Cleavage ──────────────────────────────────────────────
-    modifications  : List[ProteinModification] = Field(default_factory=list,
-                       description="Up to 7 modification entries")
-    cleavage_agent : Optional[CleavageAgent]   = None
+    Modifications : List[ProteinModification] = Field(default_factory=list,
+            description="Up to 7 modification entries")
+    CleavageAgent: Optional[CleavageAgent]   = None
 
     # ── Factor values ─────────────────────────────────────────────────────────
     factor_disease    : Optional[str] = None
     factor_treatment  : Optional[str] = None
     factor_compound   : Optional[str] = None
+
+    factor_Bait: Optional[str] = None
+    factor_CellPart: Optional[str] = None
+    factor_Compound: Optional[str] = None
+    factor_ConcentrationOfCompound: Optional[str] = None
+    factor_Disease: Optional[str] = None
+    factor_FractionIdentifier: Optional[str] = None
+    factor_GeneticModification: Optional[str] = None
+    factor_Temperature: Optional[str] = None
+    factor_Treatment: Optional[str] = None
+
 
     # ── Validators ───────────────────────────────────────────────────────────
     @field_validator('organism')
@@ -159,20 +195,20 @@ class SDRFRow(BaseModel):
     @classmethod
     def normalise_label(cls, v):
         if re.search(r'label.?free', v, re.I):
-            return LABEL_FREE
+ return LABEL_FREE
         return v
 
     @field_validator('usage')
     @classmethod
     def normalise_usage(cls, v):
         if v not in ('Raw Data File', 'Spectrum Library'):
-            return 'Raw Data File'
+ return 'Raw Data File'
         return v
 
 
 class SDRFExperiment(BaseModel):
     """All rows extracted from one publication."""
-    pxd  : str            = Field(description="ProteomeXchange ID, e.g. PXD000070")
+    pxd  : str = Field(description="ProteomeXchange ID, e.g. PXD000070")
     rows : List[SDRFRow]  = Field(default_factory=list)
 
 
