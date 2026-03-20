@@ -1,13 +1,10 @@
 """
-Helpers to clean output → validate with Pydantic → produce SDRFRow list.
+Helpers to clean LLM output → produce plain dicts for SDRF rows.
+No Pydantic dependency — works standalone.
 """
 import re
 import json
 import logging
-from datamodel import (
-    InstrumentRef, CleavageAgent, ProteinModification, SDRFRow
-)
-
 
 log = logging.getLogger('sdrf')
 
@@ -15,14 +12,13 @@ log = logging.getLogger('sdrf')
 def _fix_json_string(text: str) -> str:
     """
     Best-effort repair of common LLM JSON formatting problems:
-      1. Python None/True/False  -> null/true/false
-      2. Single-quoted strings   -> double-quoted
-      3. Trailing commas         -> removed
-      4. Truncated JSON          -> close open braces/brackets
+      1. Invalid backslash escapes  (\a etc.)
+      2. Python None/True/False     -> null/true/false
+      3. Single-quoted strings      -> double-quoted
+      4. Trailing commas            -> removed
+      5. Truncated JSON             -> close open braces/brackets
     """
-    # 0. Fix invalid backslash escapes (e.g. \a from unicode \u00a0 mangling)
-    #    Walk char-by-char: only double-escape \ not followed by a valid JSON
-    #    escape char (" \ / b f n r t u). Preserves \n, \t, \uXXXX, \\.
+    # 0. Fix invalid backslash escapes (char-by-char — preserves \n, \t, \uXXXX, \\)
     _fixed = []
     _i = 0
     while _i < len(text):
@@ -31,12 +27,12 @@ def _fix_json_string(text: str) -> str:
             if _nxt in ('"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u'):
                 _fixed.append(text[_i]); _fixed.append(_nxt); _i += 2
             else:
-                _fixed.append('\\\\'); _i += 1   # invalid → escaped
+                _fixed.append('\\\\'); _i += 1
         else:
             _fixed.append(text[_i]); _i += 1
     text = ''.join(_fixed)
 
-    # 1. Python literals — simple string replacement covers the common patterns
+    # 1. Python literals
     for py, js in (
         (': None',  ': null'),  (': True',  ': true'),  (': False',  ': false'),
         (':None',   ':null'),   (':True',   ':true'),   (':False',   ':false'),
@@ -58,38 +54,31 @@ def _fix_json_string(text: str) -> str:
                 i += 1
                 while i < len(text) and text[i] != "'":
                     if text[i] == '\\' and i + 1 < len(text):
-                        out.append(text[i]); i += 1   # keep escape sequence
+                        out.append(text[i]); i += 1
                     elif text[i] == '"':
-                        out.append('\\"')              # escape inner double-quote
+                        out.append('\\"'  )
                     else:
                         out.append(text[i])
                     i += 1
                 out.append('"')
-                i += 1   # skip closing single-quote
-            else:
-                out.append(ch)
                 i += 1
+            else:
+                out.append(ch); i += 1
         text = ''.join(out)
 
-    # 3. Trailing commas before } or ]
+    # 3. Trailing commas
     text = re.sub(r',\s*([}\]])', r'\1', text)
 
     # 4. Close truncated JSON
     opens_b = text.count('{') - text.count('}')
     opens_k = text.count('[') - text.count(']')
     if opens_b > 0 or opens_k > 0:
-        # Find last COMPLETE value: closing quote+comma is safer than bare comma
         candidates = [
-            text.rfind('",'),   # end of string value, more to follow
-            text.rfind('"}'),   # end of string value, closing object
-            text.rfind('",\n'), # same with newline
-            text.rfind('},'),   # end of sub-object
-            text.rfind('],'),   # end of array
-            text.rfind(','),    # plain comma fallback
-            text.rfind('{'),
-            text.rfind('['),
+            text.rfind('",'), text.rfind('"}'), text.rfind('"\n'),
+            text.rfind('},'), text.rfind('],'), text.rfind(','),
+            text.rfind('{'), text.rfind('['),
         ]
-        boundary = max(c for c in candidates if c >= 0) if any(c >= 0 for c in candidates) else -1
+        boundary = max((c for c in candidates if c >= 0), default=-1)
         if boundary > 0:
             text = text[:boundary]
         text = text.rstrip(' ,\n\r\t')
@@ -100,8 +89,38 @@ def _fix_json_string(text: str) -> str:
     return text
 
 
+def _safe_parse_json(text: str):
+    """
+    Robustly parse JSON from LLM output.
+    Tries json.loads first, then applies _fix_json_string repair, then
+    a targeted None/True/False substitution before a final json.loads.
+    Never uses ast.literal_eval (can't handle bare None/True/False identifiers).
+    Returns parsed value or None on failure.
+    """
+    if not text or not text.strip():
+        return None
+
+    # Strip markdown fences
+    text = re.sub(r'```(?:json)?', '', text)
+    text = re.sub(r'```', '', text).strip()
+
+    # Try as-is
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Apply full repair
+    repaired = _fix_json_string(text)
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError as e:
+        log.debug(f"JSON still broken after repair: {e}. Snippet: {repaired[:200]}")
+        return None
+
+
 def clean_json(text: str) -> str:
-    """Strip markdown, repair, extract first JSON object or array (prefers object)."""
+    """Strip markdown, repair, extract first JSON object (prefers object over array)."""
     text = re.sub(r'```(?:json)?', '', text)
     text = re.sub(r'```', '', text).strip()
     for pattern in (r'\{.*\}', r'\[.*\]'):
@@ -112,7 +131,7 @@ def clean_json(text: str) -> str:
 
 
 def clean_json_array(text: str) -> str:
-    """Strip markdown, repair, extract first JSON array (prefers array)."""
+    """Strip markdown, repair, extract first JSON array (prefers array over object)."""
     text = re.sub(r'```(?:json)?', '', text)
     text = re.sub(r'```', '', text).strip()
     for pattern in (r'\[.*\]', r'\{.*\}'):
@@ -123,10 +142,7 @@ def clean_json_array(text: str) -> str:
 
 
 def _coerce_to_dict(data) -> dict:
-    """
-    Turn whatever the LLM returned into a plain dict.
-    Handles: dict, single-element list, list of {k:v} dicts, list of [k,v] pairs.
-    """
+    """Turn whatever the LLM returned into a plain dict."""
     if isinstance(data, dict):
         return data
     if isinstance(data, list):
@@ -134,8 +150,7 @@ def _coerce_to_dict(data) -> dict:
             return data[0]
         if all(isinstance(x, dict) for x in data):
             merged = {}
-            for item in data:
-                merged.update(item)
+            for item in data: merged.update(item)
             return merged
         if all(isinstance(x, (list, tuple)) and len(x) == 2 for x in data):
             return dict(data)
@@ -144,23 +159,12 @@ def _coerce_to_dict(data) -> dict:
 
 
 def _serialise_globals(globals_dict: dict) -> str:
-    """Serialise globals dict (may contain Pydantic sub-models) to JSON string."""
-    out = {}
-    for k, v in globals_dict.items():
-        if hasattr(v, 'model_dump'):
-            out[k] = v.model_dump()
-        elif isinstance(v, list):
-            out[k] = [x.model_dump() if hasattr(x, 'model_dump') else x for x in v]
-        else:
-            out[k] = v
-    return json.dumps(out, default=str)
+    """Serialise globals dict to JSON string (handles nested dicts/lists)."""
+    return json.dumps(globals_dict, default=str)
 
 
 def _parse_kv_string(s: str) -> dict:
-    """
-    Parse NT=...;AC=...;TA=... string into a dict.
-    Also handles plain name strings like 'Trypsin' -> {'NT': 'Trypsin'}.
-    """
+    """Parse NT=...;AC=... string into a dict. Plain name → {'NT': name}."""
     if not isinstance(s, str) or '=' not in s:
         return {'NT': s.strip()} if s.strip() else {}
     result = {}
@@ -228,121 +232,29 @@ def _coerce_modification(m):
 
 
 def parse_globals(raw_json: str) -> dict:
-    """Parse and validate globals JSON. Returns a plain dict with Pydantic sub-models."""
-    cleaned = clean_json(raw_json)
-    try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        log.warning(f"globals JSON parse error: {e}. Raw: {cleaned[:300]}")
-        try:
-            import ast as _ast
-            data = _ast.literal_eval(cleaned)
-            log.info("globals recovered via ast.literal_eval")
-        except Exception:
-            return {}
-
-    data = _coerce_to_dict(data)
-
-    if 'instrument' in data:
-        data['instrument'] = _coerce_instrument(data['instrument'])
-    if 'cleavage_agent' in data:
-        data['cleavage_agent'] = _coerce_cleavage(data['cleavage_agent'])
-    if 'modifications' in data and isinstance(data['modifications'], list):
-        data['modifications'] = [
-            m2 for m in data['modifications']
-            if (m2 := _coerce_modification(m)) is not None
-        ]
-    return data
-
-
-def parse_samples(raw_json: str, globals_dict: dict,
-                  file_list: list, pxd: str) -> list:
     """
-    Parse samples JSON array → list of validated SDRFRow objects.
-    Merges experiment globals into each row.
-    Falls back to minimal rows per file if extraction fails.
+    Parse globals JSON from LLM output.
+    Returns a plain dict — no Pydantic models.
+    Instrument and CleavageAgent stay as dicts or strings.
     """
-    cleaned = clean_json_array(raw_json)
-    try:
-        samples = json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        log.warning(f"[{pxd}] samples JSON parse error: {e}. Raw: {cleaned[:300]}")
-        try:
-            import ast as _ast
-            samples = _ast.literal_eval(cleaned)
-            log.info(f"[{pxd}] samples recovered via ast.literal_eval")
-        except Exception:
-            samples = []
+    data = _safe_parse_json(clean_json(raw_json))
+    if data is None:
+        log.warning(f"globals parse failed. Raw snippet: {raw_json[:200]}")
+        return {}
+    return _coerce_to_dict(data)
 
-    if isinstance(samples, dict):
-        samples = [samples]
-    elif not isinstance(samples, list):
-        samples = []
 
-    rows = []
-    for i, s in enumerate(samples):
-        if not isinstance(s, dict):
-            continue
-        merged = {**globals_dict, **s}
-
-        if not merged.get('raw_data_file') and file_list:
-            merged['raw_data_file'] = file_list[i % len(file_list)]
-        if not merged.get('source_name'):
-            merged['source_name'] = f"Sample {i+1}"
-        if not merged.get('assay_name'):
-            merged['assay_name'] = f"run {i+1}"
-        if not merged.get('organism'):
-            merged['organism'] = 'not available'
-
-        # Coerce sub-model fields that arrived as strings
-        for key, coerce_fn in (('instrument',    _coerce_instrument),
-                                ('cleavage_agent', _coerce_cleavage)):
-            if key in merged and isinstance(merged[key], str):
-                merged[key] = coerce_fn(merged[key])
-        if 'modifications' in merged and isinstance(merged['modifications'], list):
-            merged['modifications'] = [
-                m2 for m in merged['modifications']
-                if (m2 := _coerce_modification(m)) is not None
-            ]
-
-        # Strip None values so Pydantic field defaults kick in
-        # (model returning null for 'label' must not override default=LABEL_FREE)
-        merged = {k: v for k, v in merged.items() if v is not None}
-
-        # Coerce NT=... kv-strings in plain scalar string fields
-        for _pf in ('fragmentation_method', 'acquisition_method',
-                    'ionization_type', 'ms2_mass_analyzer', 'enrichment_method'):
-            _v = merged.get(_pf)
-            if isinstance(_v, str) and '=' in _v:
-                merged[_pf] = _parse_kv_string(_v).get('NT', _v)
-
-        try:
-            rows.append(SDRFRow(**merged))
-        except Exception as e:
-            log.warning(f"[{pxd}] Row {i} validation failed: {e}. merged={str(merged)[:200]}")
-
-    # Fallback: produce minimal rows for every file
-    if not rows and file_list:
-        log.warning(f"[{pxd}] Falling back to minimal rows for {len(file_list)} files.")
-        for i, fname in enumerate(file_list):
-            minimal = {
-                k: v for k, v in globals_dict.items()
-                if k in ('organism', 'label', 'instrument', 'cleavage_agent',
-                         'modifications', 'fragmentation_method',
-                         'precursor_mass_tolerance', 'fragment_mass_tolerance')
-            }
-            minimal.update({
-                'source_name'  : f"Sample {i+1}",
-                'assay_name'   : f"run {i+1}",
-                'raw_data_file': fname,
-                'organism'     : globals_dict.get('organism', 'not available')
-                                 if isinstance(globals_dict.get('organism'), str)
-                                 else 'not available',
-                'usage'        : 'Raw Data File',
-            })
-            try:
-                rows.append(SDRFRow(**minimal))
-            except Exception as e:
-                log.warning(f"[{pxd}] minimal row {i} failed: {e}")
-    return rows
-
+def parse_samples(raw_json: str, pxd: str = '') -> list:
+    """
+    Parse samples JSON array from LLM output.
+    Returns a list of plain dicts — no Pydantic models.
+    """
+    data = _safe_parse_json(clean_json_array(raw_json))
+    if data is None:
+        log.warning(f"[{pxd}] samples parse failed. Raw snippet: {raw_json[:200]}")
+        return []
+    if isinstance(data, dict):
+        return [data]
+    if isinstance(data, list):
+        return [s for s in data if isinstance(s, dict)]
+    return []
