@@ -292,11 +292,9 @@ class CvNormaliser:
         Normalise a single cell value for a given submission column.
         Returns the canonical string, or the original value if no mapping found.
         """
-        if not value or value == NA:
-            return value
-        v = str(value).strip()
-        if v in (NA, '', 'nan'):
-            return v
+        v = str(value).strip() if value is not None else ''
+        if v in ('', 'nan', 'NaN', 'None', NA):
+            return NA
 
         result = None
 
@@ -340,6 +338,18 @@ class CvNormaliser:
             # Try OLS for modification normalisation
             if self.ols is not None:
                 result = _ols_modification(self.ols, v)
+
+        elif col == 'Characteristics[Organism]':
+            result = _normalise_organism(v, self.ols)
+
+        elif col == 'Characteristics[CellLine]':
+            result = _normalise_cell_line(v, self.ols)
+
+        elif col == 'Characteristics[OrganismPart]':
+            result = _normalise_organism_part(v, self.ols)
+
+        elif col == 'Characteristics[Disease]':
+            result = _normalise_disease(v, self.ols)
 
         if result is not None and result != v:
             log.debug(f'{col}: {v!r} → {result!r}')
@@ -401,7 +411,12 @@ def normalise_submission(submission: pd.DataFrame,
             'Characteristics[Label]',
             'Characteristics[AlkylationReagent]',
             'Characteristics[ReductionReagent]',
-        ) and not col.startswith('Characteristics[Modification'):
+        ) and not col.startswith('Characteristics[Modification')         and col not in (
+            'Characteristics[Organism]',
+            'Characteristics[CellLine]',
+            'Characteristics[OrganismPart]',
+            'Characteristics[Disease]',
+        ):
             continue
 
         out[col] = out[col].apply(lambda v: cv.normalise(col, str(v).strip()))
@@ -452,3 +467,119 @@ if __name__ == '__main__':
         result = cv.normalise(col, val)
         marker = '✓' if result != val else '·'
         print(f"  {marker} {col:43} {val!r:35} → {result!r}")
+
+
+# ── Organism / Cell line / OrganismPart / Disease normalisers ─────────────────
+# Added separately from CV fields because these use plain text (not NT=;AC= format)
+# and require synonym resolution rather than format conversion.
+
+# Organism: keyword → canonical NCBI name
+# Covers >99% of proteomics papers. OLS ncbitaxon fallback for unknowns.
+_ORGANISM_MAP = [
+    (r'\bhomo\s+sapiens\b|\bhuman\b|\bh\.?\s*sapiens\b',         'Homo sapiens'),
+    (r'\bmus\s+musculus\b|\bmouse\b|\bmurine\b|\bm\.?\s*musculus\b', 'Mus musculus'),
+    (r'\brattus\s+norvegicus\b|\brat\b|\brats\b',                'Rattus norvegicus'),
+    (r'\bsaccharomyces\s+cerevisiae\b|\byeast\b',                'Saccharomyces cerevisiae'),
+    (r'\bescherichia\s+coli\b|\be\.?\s*coli\b',                  'Escherichia coli'),
+    (r'\bdroso\w*\s+melanogaster\b|\bdrosophila\b|\bfly\b',      'Drosophila melanogaster'),
+    (r'\bdanio\s+rerio\b|\bzebrafish\b',                         'Danio rerio'),
+    (r'\bcaenorhabditis\s+elegans\b|\bc\.?\s*elegans\b',         'Caenorhabditis elegans'),
+    (r'\barabidopsis\s+thaliana\b|\barabidopsis\b',              'Arabidopsis thaliana'),
+    (r'\bplasmodium\s+falciparum\b',                             'Plasmodium falciparum'),
+    (r'\bplasmodium\s+vivax\b',                                  'Plasmodium vivax'),
+    (r'\bxenopus\s+laevis\b',                                    'Xenopus laevis'),
+    (r'\bxenopus\s+tropicalis\b',                                'Xenopus tropicalis'),
+    (r'\bbos\s+taurus\b|\bbovine\b|\bcow\b',                     'Bos taurus'),
+    (r'\bsus\s+scrofa\b|\bpig\b|\bporcine\b|\bswine\b',         'Sus scrofa'),
+    (r'\bgallus\s+gallus\b|\bchicken\b',                         'Gallus gallus'),
+    (r'\bcandida\s+albicans\b',                                  'Candida albicans'),
+    (r'\bschizosaccharomyces\s+pombe\b|\bfission\s+yeast\b',     'Schizosaccharomyces pombe'),
+    (r'\bmycobacterium\s+tuberculosis\b',                        'Mycobacterium tuberculosis'),
+    (r'\bsars.?cov.?2\b|sars\s+coronavirus\s+2',                'Severe acute respiratory syndrome coronavirus 2'),
+    (r'\bsynechocystis\b',                                       'Synechocystis sp. PCC 6803'),
+    (r'\bchlamy\w*\s+reinhardtii\b|\bchlamydomonas\b',          'Chlamydomonas reinhardtii'),
+    (r'\btoxoplasma\s+gondii\b',                                 'Toxoplasma gondii'),
+    (r'\bneisseria\s+meningitidis\b',                            'Neisseria meningitidis'),
+]
+
+
+def _normalise_organism(value: str, ols_client=None) -> str:
+    """Normalise organism name to NCBI canonical label."""
+    if not value or value == NA:
+        return value
+    v = value.strip()
+    # Check keyword map
+    result = _apply_map(v, _ORGANISM_MAP)
+    if result:
+        return result
+    # OLS fallback — ncbitaxon
+    if ols_client:
+        try:
+            hits = ols_client.cache_search(v, 'ncbitaxon', full_search=True)
+            if hits:
+                lbl = hits[0].get('label', v)
+                return lbl.capitalize() if lbl else v
+        except Exception:
+            pass
+    return v
+
+
+def _normalise_cell_line(value: str, ols_client=None) -> str:
+    """
+    Normalise cell line name via OLS CLO/EFO cache.
+    Keyword map not used — cell line names are too numerous and
+    the OLS label IS the canonical spelling we want.
+    """
+    if not value or value in (NA, 'Not Applicable', ''):
+        return value
+    v = value.strip()
+    if ols_client:
+        # Try CLO first, then EFO
+        for ontology in ('clo', 'efo'):
+            try:
+                hits = ols_client.cache_search(v, ontology, full_search=False)
+                if not hits:
+                    hits = ols_client.cache_search(v, ontology, full_search=True)
+                if hits:
+                    lbl = hits[0].get('label', v)
+                    return lbl if lbl else v
+            except Exception:
+                continue
+    return v
+
+
+def _normalise_organism_part(value: str, ols_client=None) -> str:
+    """Normalise organism part/tissue via UBERON OLS cache."""
+    if not value or value in (NA, ''):
+        return value
+    v = value.strip()
+    if ols_client:
+        try:
+            hits = ols_client.cache_search(v, 'uberon', full_search=False)
+            if not hits:
+                hits = ols_client.cache_search(v, 'uberon', full_search=True)
+            if hits:
+                lbl = hits[0].get('label', v)
+                return lbl if lbl else v
+        except Exception:
+            pass
+    return v
+
+
+def _normalise_disease(value: str, ols_client=None) -> str:
+    """Normalise disease term via MONDO/EFO OLS cache."""
+    if not value or value in (NA, 'normal', 'not applicable', ''):
+        return value
+    v = value.strip()
+    if ols_client:
+        for ontology in ('mondo', 'efo'):
+            try:
+                hits = ols_client.cache_search(v, ontology, full_search=False)
+                if not hits:
+                    hits = ols_client.cache_search(v, ontology, full_search=True)
+                if hits:
+                    lbl = hits[0].get('label', v)
+                    return lbl if lbl else v
+            except Exception:
+                continue
+    return v
