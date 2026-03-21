@@ -390,3 +390,120 @@ def score(solution: pd.DataFrame, submission: pd.DataFrame, row_id_column_name: 
 
     vals = eval_df["f1"].dropna()
     return float(vals.mean()) if not vals.empty else 0.0, harmonized_A, harmonized_B, eval_df
+
+"""
+compare_submissions
+
+Columnwise comparison of two (or more) submission CSV files.
+Usage:
+    python compare_submissions.py sub1.csv sub2.csv [sub3.csv ...]
+
+Output:
+    - Per-column table: NA%, agreement%, category
+    - Summary by category
+"""
+
+
+NA = 'Not Applicable'
+ID_COLS = {'ID', 'PXD', 'Raw Data File', 'Usage'}
+
+
+def load(path):
+    return pd.read_csv(path)
+
+
+def compare_two(a: pd.DataFrame, b: pd.DataFrame,
+                name_a='A', name_b='B') -> pd.DataFrame:
+    """
+    Compare two submissions column by column, aligned on ID.
+    Returns a DataFrame with one row per data column.
+    """
+    data_cols = [c for c in a.columns if c not in ID_COLS]
+
+    # Align on ID
+    merged = a[['ID'] + data_cols].merge(
+        b[['ID'] + data_cols].rename(columns={c: c + '_b' for c in data_cols}),
+        on='ID'
+    )
+
+    rows = []
+    for col in data_cols:
+        bc = col + '_b'
+        na_a = (merged[col] == NA).mean()
+        na_b = (merged[bc]  == NA).mean()
+        agree = (merged[col] == merged[bc]).mean()
+
+        # Categorise
+        if na_a > 0.95 and na_b > 0.95:
+            cat = 'both_NA'
+        elif na_a > 0.5 and na_b < 0.5:
+            cat = 'A_missing'    # A=NA, B has values
+        elif na_a < 0.5 and na_b > 0.5:
+            cat = 'B_missing'    # A has values, B=NA
+        elif agree > 0.90:
+            cat = 'agree'
+        elif agree > 0.50:
+            cat = 'partial'
+        else:
+            cat = 'differ'
+
+        rows.append({
+            'column'        : col,
+            f'NA%_{name_a}' : f'{na_a:.0%}',
+            f'NA%_{name_b}' : f'{na_b:.0%}',
+            'agree%'        : f'{agree:.0%}',
+            'category'      : cat,
+        })
+
+    return pd.DataFrame(rows)
+
+
+# compare_submissions(
+#    ("baseline", df1),
+#    ("model_v2", df2),
+#    ("ensemble", df3),
+#)
+def compare_submissions(*named_subs):
+    if len(named_subs) < 2:
+        raise ValueError("Provide at least two (name, DataFrame) pairs")
+
+    names = [name for name, _ in named_subs]
+    subs  = [df for _, df in named_subs]
+
+    print(f"\n{'='*70}")
+    for name, sub in zip(names, subs):
+        print(f"  {name}: {sub.shape[0]} rows, {sub.shape[1]} cols")
+    print(f"{'='*70}\n")
+
+    df = compare_two(subs[0], subs[1], names[0], names[1])
+
+    print(df.to_string(index=False))
+    print()
+
+    print("=== Summary by category ===")
+    for cat, grp in df.groupby('category'):
+        cols = grp['column'].tolist()
+        print(f"\n  {cat} ({len(cols)}):")
+        for c in cols:
+            print(f"    {c}")
+
+    if len(subs) >= 3:
+        print(f"\n{'='*70}")
+        print("Multi-way agreement analysis (columns with <80% all-agree):")
+
+        data_cols = [c for c in subs[0].columns if c not in ID_COLS]
+        m = subs[0][['ID'] + data_cols].copy()
+
+        for i, sub in enumerate(subs[1:], 1):
+            m = m.merge(
+                sub[['ID'] + data_cols].rename(
+                    columns={c: f'{c}_{i}' for c in data_cols}
+                ),
+                on='ID'
+            )
+
+        for col in data_cols:
+            cols_i = [col] + [f'{col}_{i}' for i in range(1, len(subs))]
+            all_agree = (m[cols_i].nunique(axis=1) == 1).mean()
+            if all_agree < 0.8:
+                print(f"  {col:50} all_agree={all_agree:.0%}")
