@@ -386,7 +386,7 @@ def score(solution: pd.DataFrame, submission: pd.DataFrame, row_id_column_name: 
 
     sol = load_sdrf(solution)
     sub = load_sdrf(submission)
-    _, _, eval_df = Harmonize_and_Evaluate_datasets(sol, sub, threshold=0.80)
+    harmonized_A, harmonized_B, eval_df = Harmonize_and_Evaluate_datasets(sol, sub, threshold=0.80)
 
     vals = eval_df["f1"].dropna()
-    return float(vals.mean()) if not vals.empty else 0.0
+    return float(vals.mean()) if not vals.empty else 0.0, harmonized_A, harmonized_B, eval_df
