@@ -107,19 +107,22 @@ _SKIP_SNAP = {
 
 
 def build_vocab(train_sdrf_dir: Path,
+                sample_sub_path: Path,
                 min_count: int = 1) -> Dict[str, Counter]:
     """
     Read all training SDRF TSV (or CSV) files and build a Counter of
     observed values per submission column.
 
     Args:
-        train_sdrf_dir : directory containing *_cleaned.sdrf.tsv or Harmonized_*.csv
-        min_count      : minimum occurrences to include a value in vocab
+        train_sdrf_dir  : directory containing *_cleaned.sdrf.tsv or Harmonized_*.csv
+        sample_sub_path : explicit path to SampleSubmission.csv
+        min_count       : minimum occurrences to include a value in vocab
 
     Returns:
         dict mapping submission_col_name → Counter{value: count}
     """
-    train_sdrf_dir = Path(train_sdrf_dir)
+    train_sdrf_dir  = Path(train_sdrf_dir)
+    sample_sub_path = Path(sample_sub_path)
 
     # Discover files — support both local (*.tsv) and Kaggle (*.csv) formats
     tsv_files = list(train_sdrf_dir.glob('*_cleaned.sdrf.tsv'))
@@ -132,24 +135,10 @@ def build_vocab(train_sdrf_dir: Path,
 
     log.info(f'Building vocab from {len(files)} training files in {train_sdrf_dir}')
 
-    # Submission columns we care about
-    # Build TSV-col-norm → submission-col lookup
-    try:
-        # Search: same dir first, then parent dirs
-        sample_sub_path = None
-        for candidate in [train_sdrf_dir] + list(train_sdrf_dir.parents):
-            p = candidate / 'SampleSubmission.csv'
-            if p.exists():
-                sample_sub_path = p
-                break
-        if sample_sub_path is None:
-            raise FileNotFoundError('SampleSubmission.csv not found')
-        sub_template = pd.read_csv(sample_sub_path, nrows=0)
-        SUBMISSION_COLS = [c for c in sub_template.columns
-                           if c not in ('ID', 'PXD', 'Raw Data File', 'Usage')]
-    except Exception:
-        log.warning('Could not find SampleSubmission.csv — using hard-coded col list')
-        SUBMISSION_COLS = []   # vocab will still build but won't map
+    # Load submission column list
+    sub_template    = pd.read_csv(sample_sub_path, nrows=0)
+    SUBMISSION_COLS = [c for c in sub_template.columns
+                       if c not in ('ID', 'PXD', 'Raw Data File', 'Usage')]
 
     # Map normalised TSV col name → submission col name(s)
     tsv_norm_to_sub: dict[str, list[str]] = defaultdict(list)
