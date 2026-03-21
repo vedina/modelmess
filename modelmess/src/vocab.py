@@ -150,6 +150,7 @@ def build_vocab(train_sdrf_dir: Path,
         if base != tc:
             tsv_norm_to_sub[_tsv_col_norm(base)].append(sc)
 
+    #print(tsv_norm_to_sub)
     vocab: Dict[str, Counter] = defaultdict(Counter)
 
     for fpath in files:
@@ -161,10 +162,15 @@ def build_vocab(train_sdrf_dir: Path,
             continue
 
         # Build normalised col lookup for this file
-        file_col_norm = {_tsv_col_norm(c): c for c in df.columns}
-
+        file_col_norm = {
+            _tsv_col_norm(c).replace("characteristics", "").replace("comment", ""):
+            c
+            for c in df.columns
+        }
+        #print("file_col_norm",file_col_norm)
         for tsv_norm, sub_cols in tsv_norm_to_sub.items():
             if tsv_norm not in file_col_norm:
+                #print(tsv_norm, file_col_norm.keys())
                 continue
             actual_col = file_col_norm[tsv_norm]
             vals = (df[actual_col]
@@ -174,7 +180,7 @@ def build_vocab(train_sdrf_dir: Path,
                     .tolist())
             for v in vals:
                 v = v.strip()
-                if v in ('', 'nan', NA, 'not applicable', 'Not Applicable',
+                if v in ('', 'nan', 'NA', 'not applicable', 'Not Applicable',
                           'N/A', 'n/a', 'NA', 'TextSpan', 'Text Span'):
                     continue
                 for sc in sub_cols:
