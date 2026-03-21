@@ -40,7 +40,7 @@ NA = 'Not Applicable'
 
 def _nt_ac(name: str, accession: str) -> str:
     """Format a CV term as NT=name;AC=accession."""
-    return f'NT={name};AC={accession}'
+    return f'AC={accession};NT={name}'
 
 
 def _sim(a: str, b: str) -> float:
@@ -82,12 +82,12 @@ def _extract_nt(value: str) -> str:
 
 _FRAGMENTATION_MAP = [
     # (regex pattern,  canonical NT=...;AC=... string)
-    (r'\bhcd\b|higher.energy\s+collision',          'NT=HCD;AC=MS:1000422'),
-    (r'\bcid\b|collision.induced',                   'NT=CID;AC=MS:1000133'),
-    (r'\betd\b|electron\s+transfer\s+dissoc',        'NT=ETD;AC=MS:1001848'),
-    (r'\becd\b|electron\s+capture\s+dissoc',         'NT=ECD;AC=MS:1000250'),
-    (r'\bethcd\b|eth?hcd\b',                         'NT=EThcD;AC=MS:1002631'),
-    (r'\buvpd\b',                                    'NT=UVPD;AC=MS:1003246'),
+    (r'\bhcd\b|higher.energy\s+collision',          'AC=MS:1000422;NT=HCD'),
+    (r'\bcid\b|collision.induced',                   'AC=MS:1000133;NT=CID'),
+    (r'\betd\b|electron\s+transfer\s+dissoc',        'AC=MS:1001848;NT=ETD'),
+    (r'\becd\b|electron\s+capture\s+dissoc',         'AC=MS:1000250;NT=ECD'),
+    (r'\bethcd\b|eth?hcd\b',                         'AC=MS:1002631;NT=EThcD'),
+    (r'\buvpd\b',                                    'AC=MS:1003246;NT=UVPD'),
 ]
 
 _ACQUISITION_MAP = [
@@ -99,103 +99,103 @@ _ACQUISITION_MAP = [
 
 _SEPARATION_MAP = [
     (r'reversed?.phase|rplc|rp.?lc|nano\s*lc|nanoflow|c18|c8\b',
-     'NT=Reversed-phase chromatography;AC=PRIDE:0000563'),
+     'AC=PRIDE:0000563;NT=Reversed-phase chromatography'),
     (r'\bscx\b|strong\s+cation',
-     'NT=SCX;AC=PRIDE:0000558'),
+     'AC=PRIDE:0000558;NT=SCX'),
     (r'\bsax\b|strong\s+anion',
-     'NT=SAX;AC=PRIDE:0000557'),
+     'AC=PRIDE:0000557;NT=SAX'),
     (r'\bhilic\b',
-     'NT=HILIC;AC=PRIDE:0000551'),
+     'AC=PRIDE:0000551;NT=HILIC'),
     (r'size.exclusion|sec\b',
-     'NT=Size exclusion chromatography;AC=PRIDE:0000560'),
+     'AC=PRIDE:0000560;NT=Size exclusion chromatography'),
     (r'ion\s+exchange',
-     'NT=Ion exchange chromatography;AC=PRIDE:0000554'),
+     'AC=PRIDE:0000554;NT=Ion exchange chromatography'),
     (r'hplc|high.performance\s+liquid',
-     'NT=High-performance liquid chromatography;AC=PRIDE:0000565'),
+     'AC=PRIDE:0000565;NT=High-performance liquid chromatography'),
 ]
 
 _FRACTIONATION_MAP = [
     (r'no\s+fraction|without\s+fraction|single.shot|not\s+fraction',
-     'NT=No fractionation;AC=PRIDE:0000552'),
+     'AC=PRIDE:0000552;NT=No fractionation'),
     (r'high.?ph\s+rp|basic\s+rp|high\s+ph\s+revers',
-     'NT=high pH RPLC;AC=PRIDE:0000564'),
+     'AC=PRIDE:0000564;NT=high pH RPLC'),
     (r'\bscx\b.*(frac|chrom)|strong\s+cation.*frac',
-     'NT=SCX;AC=PRIDE:0000558'),
+     'AC=PRIDE:0000558;NT=SCX'),
     (r'sds.?page|gel.*frac|in.gel',
-     'NT=SDS-PAGE;AC=PRIDE:0000568'),
+     'AC=PRIDE:0000568;NT=SDS-PAGE'),
     (r'off.?line\s+rplc|off.?line.*reverse',
-     'NT=Off-line RP;AC=PRIDE:0000563'),
+     'AC=PRIDE:0000563;NT=Off-line RP'),
 ]
 
 _IONIZATION_MAP = [
-    (r'\bnano.?esi\b|nanoesi|nanospray',  'NT=nanoelectrospray;AC=MS:1000398'),
-    (r'\besi\b|electrospray',             'NT=electrospray ionization;AC=MS:1000073'),
-    (r'\bmaldi\b',                        'NT=matrix-assisted laser desorption ionization;AC=MS:1000075'),
-    (r'\bapci\b',                         'NT=atmospheric pressure chemical ionization;AC=MS:1000070'),
+    (r'\bnano.?esi\b|nanoesi|nanospray',  'AC=MS:1000398;NT=nanoelectrospray'),
+    (r'\besi\b|electrospray',             'AC=MS:1000073;NT=electrospray ionization'),
+    (r'\bmaldi\b',                        'AC=MS:1000075;NT=matrix-assisted laser desorption ionization'),
+    (r'\bapci\b',                         'AC=MS:1000070;NT=atmospheric pressure chemical ionization'),
 ]
 
 _CLEAVAGE_MAP = [
     (r'lys.?c.*trypsin|trypsin.*lys.?c',
-     'NT=Trypsin;AC=MS:1001251|NT=Lys-C;AC=MS:1001309'),
-    (r'\blys.?c\b',        'NT=Lys-C;AC=MS:1001309'),
-    (r'\btrypsin\b',       'NT=Trypsin;AC=MS:1001251'),
-    (r'\bchymotrypsin\b',  'NT=Chymotrypsin;AC=MS:1001306'),
-    (r'\bglu.?c\b',        'NT=Glu-C;AC=MS:1001917'),
-    (r'\basp.?n\b',        'NT=Asp-N;AC=MS:1001305'),
-    (r'\barg.?c\b',        'NT=Arg-C;AC=MS:1001303'),
-    (r'\bbnps.skatole\b',  'NT=CNBr;AC=MS:1001308'),
-    (r'\bcnbr\b',          'NT=CNBr;AC=MS:1001308'),
+     'AC=MS:1001251;NT=Trypsin|AC=MS:1001309;NT=Lys-C'),
+    (r'\blys.?c\b',        'AC=MS:1001309;NT=Lys-C'),
+    (r'\btrypsin\b',       'AC=MS:1001251;NT=Trypsin'),
+    (r'\bchymotrypsin\b',  'AC=MS:1001306;NT=Chymotrypsin'),
+    (r'\bglu.?c\b',        'AC=MS:1001917;NT=Glu-C'),
+    (r'\basp.?n\b',        'AC=MS:1001305;NT=Asp-N'),
+    (r'\barg.?c\b',        'AC=MS:1001303;NT=Arg-C'),
+    (r'\bbnps.skatole\b',  'AC=MS:1001308;NT=CNBr'),
+    (r'\bcnbr\b',          'AC=MS:1001308;NT=CNBr'),
 ]
 
 _LABEL_MAP = [
-    (r'label.free|lfq\b',                   'NT=label free sample;AC=MS:1002038'),
-    (r'\btmt\s*16|tmt16',                   'NT=TMT16plex;AC=PRIDE:0000543'),
-    (r'\btmt\s*11|tmt11',                   'NT=TMT11plex;AC=MS:1002229'),
-    (r'\btmt\s*10|tmt10',                   'NT=TMT10plex;AC=MS:1002228'),
-    (r'\btmt\s*6|tmt6',                     'NT=TMT6plex;AC=MS:1001736'),
-    (r'\btmt\s*2|tmt2',                     'NT=TMT2plex;AC=MS:1002723'),
-    (r'\btmt\b',                            'NT=TMT;AC=MS:1002038'),
-    (r'\bitraq\s*8|itraq8',                 'NT=iTRAQ8plex;AC=MS:1001985'),
-    (r'\bitraq\s*4|itraq4',                 'NT=iTRAQ4plex;AC=MS:1001522'),
-    (r'\bitraq\b',                          'NT=iTRAQ;AC=MS:1001522'),
-    (r'\bsilac\b',                          'NT=SILAC;AC=MS:1002038'),
-    (r'\bdimethyl\b',                       'NT=Dimethyl;AC=PRIDE:0000534'),
-    (r'\breductive\s+dimethylation',        'NT=Dimethyl;AC=PRIDE:0000534'),
+    (r'label.free|lfq\b',                   'AC=MS:1002038;NT=label free sample'),
+    (r'\btmt\s*16|tmt16',                   'AC=PRIDE:0000543;NT=TMT16plex'),
+    (r'\btmt\s*11|tmt11',                   'AC=MS:1002229;NT=TMT11plex'),
+    (r'\btmt\s*10|tmt10',                   'AC=MS:1002228;NT=TMT10plex'),
+    (r'\btmt\s*6|tmt6',                     'AC=MS:1001736;NT=TMT6plex'),
+    (r'\btmt\s*2|tmt2',                     'AC=MS:1002723;NT=TMT2plex'),
+    (r'\btmt\b',                            'AC=MS:1002038;NT=TMT'),
+    (r'\bitraq\s*8|itraq8',                 'AC=MS:1001985;NT=iTRAQ8plex'),
+    (r'\bitraq\s*4|itraq4',                 'AC=MS:1001522;NT=iTRAQ4plex'),
+    (r'\bitraq\b',                          'AC=MS:1001522;NT=iTRAQ'),
+    (r'\bsilac\b',                          'AC=MS:1002038;NT=SILAC'),
+    (r'\bdimethyl\b',                       'AC=PRIDE:0000534;NT=Dimethyl'),
+    (r'\breductive\s+dimethylation',        'AC=PRIDE:0000534;NT=Dimethyl'),
 ]
 
 _MS2_ANALYZER_MAP = [
-    (r'orbitrap',          'NT=orbitrap;AC=MS:1000484'),
-    (r'ion\s*trap|iontrap', 'NT=ion trap;AC=MS:1000264'),
-    (r'\btof\b|time.of.flight', 'NT=time-of-flight;AC=MS:1000084'),
-    (r'\bquadrupole\b|\bq\b', 'NT=quadrupole;AC=MS:1000081'),
-    (r'\bfticr\b|ft.?icr|fourier', 'NT=fourier transform ion cyclotron resonance mass spectrometer;AC=MS:1000079'),
+    (r'orbitrap',          'AC=MS:1000484;NT=orbitrap'),
+    (r'ion\s*trap|iontrap', 'AC=MS:1000264;NT=ion trap'),
+    (r'\btof\b|time.of.flight', 'AC=MS:1000084;NT=time-of-flight'),
+    (r'\bquadrupole\b|\bq\b', 'AC=MS:1000081;NT=quadrupole'),
+    (r'\bfticr\b|ft.?icr|fourier', 'AC=MS:1000079;NT=fourier transform ion cyclotron resonance mass spectrometer'),
 ]
 
 # Instrument: matched against LLM output, returns NT=...;AC=... string
 _INSTRUMENT_MAP = [
-    (r'orbitrap\s*astral',                  'NT=Orbitrap Astral;AC=MS:1003378'),
-    (r'q\s*exactive\s*hf.?x',              'NT=Q Exactive HF-X;AC=MS:1002877'),
-    (r'q\s*exactive\s*hf',                 'NT=Q Exactive HF;AC=MS:1002523'),
-    (r'q\s*exactive\s*plus',               'NT=Q Exactive Plus;AC=MS:1002634'),
-    (r'q\s*exactive',                      'NT=Q Exactive;AC=MS:1001911'),
-    (r'orbitrap\s*fusion\s*lumos',         'NT=Orbitrap Fusion Lumos;AC=MS:1002732'),
-    (r'orbitrap\s*fusion',                 'NT=Orbitrap Fusion;AC=MS:1002416'),
-    (r'orbitrap\s*exploris\s*480',         'NT=Orbitrap Exploris 480;AC=MS:1003028'),
-    (r'orbitrap\s*eclipse',                'NT=Orbitrap Eclipse;AC=MS:1003029'),
-    (r'orbitrap\s*elite',                  'NT=LTQ Orbitrap Elite;AC=MS:1001910'),
-    (r'orbitrap\s*velos',                  'NT=LTQ Orbitrap Velos;AC=MS:1001742'),
-    (r'ltq\s*orbitrap\b',                  'NT=LTQ Orbitrap;AC=MS:1000449'),
-    (r'ltq\s*xl',                          'NT=LTQ XL;AC=MS:1000854'),
-    (r'\bltq\b',                           'NT=LTQ;AC=MS:1000447'),
-    (r'timstof\s*pro\s*2',                 'NT=timsTOF Pro 2;AC=MS:1003230'),
-    (r'timstof\s*pro',                     'NT=timsTOF Pro;AC=MS:1003005'),
-    (r'\btimstof\b',                       'NT=timsTOF;AC=MS:1002817'),
-    (r'triple\s*tof\s*6600|sciex\s*6600',  'NT=TripleTOF 6600;AC=MS:1002533'),
-    (r'triple\s*tof\s*5600|sciex\s*5600',  'NT=TripleTOF 5600;AC=MS:1002532'),
-    (r'synapt\s*g2',                       'NT=Synapt G2 MS;AC=MS:1002280'),
-    (r'\bsynapt\b',                        'NT=Synapt MS;AC=MS:1001490'),
-    (r'xevo\s*g2',                         'NT=Xevo G2 QTOF;AC=MS:1001535'),
-    (r'maxi\s*ms',                         'NT=maXis;AC=MS:1001534'),
+    (r'orbitrap\s*astral',                  'AC=MS:1003378;NT=Orbitrap Astral'),
+    (r'q\s*exactive\s*hf.?x',              'AC=MS:1002877;NT=Q Exactive HF-X'),
+    (r'q\s*exactive\s*hf',                 'AC=MS:1002523;NT=Q Exactive HF'),
+    (r'q\s*exactive\s*plus',               'AC=MS:1002634;NT=Q Exactive Plus'),
+    (r'q\s*exactive',                      'AC=MS:1001911;NT=Q Exactive'),
+    (r'orbitrap\s*fusion\s*lumos',         'AC=MS:1002732;NT=Orbitrap Fusion Lumos'),
+    (r'orbitrap\s*fusion',                 'AC=MS:1002416;NT=Orbitrap Fusion'),
+    (r'orbitrap\s*exploris\s*480',         'AC=MS:1003028;NT=Orbitrap Exploris 480'),
+    (r'orbitrap\s*eclipse',                'AC=MS:1003029;NT=Orbitrap Eclipse'),
+    (r'orbitrap\s*elite',                  'AC=MS:1001910;NT=LTQ Orbitrap Elite'),
+    (r'orbitrap\s*velos',                  'AC=MS:1001742;NT=LTQ Orbitrap Velos'),
+    (r'ltq\s*orbitrap\b',                  'AC=MS:1000449;NT=LTQ Orbitrap'),
+    (r'ltq\s*xl',                          'AC=MS:1000854;NT=LTQ XL'),
+    (r'\bltq\b',                           'AC=MS:1000447;NT=LTQ'),
+    (r'timstof\s*pro\s*2',                 'AC=MS:1003230;NT=timsTOF Pro 2'),
+    (r'timstof\s*pro',                     'AC=MS:1003005;NT=timsTOF Pro'),
+    (r'\btimstof\b',                       'AC=MS:1002817;NT=timsTOF'),
+    (r'triple\s*tof\s*6600|sciex\s*6600',  'AC=MS:1002533;NT=TripleTOF 6600'),
+    (r'triple\s*tof\s*5600|sciex\s*5600',  'AC=MS:1002532;NT=TripleTOF 5600'),
+    (r'synapt\s*g2',                       'AC=MS:1002280;NT=Synapt G2 MS'),
+    (r'\bsynapt\b',                        'AC=MS:1001490;NT=Synapt MS'),
+    (r'xevo\s*g2',                         'AC=MS:1001535;NT=Xevo G2 QTOF'),
+    (r'maxi\s*ms',                         'AC=MS:1001534;NT=maXis'),
 ]
 
 # Map LLM alkylation reagent names to canonical short forms
@@ -242,7 +242,7 @@ def _ols_instrument(client, value: str) -> Optional[str]:
         acc = hit.get('obo_id', hit.get('accession', ''))
         lbl = hit.get('label', name)
         if acc:
-            return f'NT={lbl};AC={acc}'
+            return f'AC={acc};NT={lbl}'
     return None
 
 
@@ -421,7 +421,7 @@ if __name__ == '__main__':
         ('Comment[FragmentationMethod]',      'HCD'),
         ('Comment[FragmentationMethod]',      'higher-energy collisional dissociation'),
         ('Comment[FragmentationMethod]',      'CID'),
-        ('Comment[FragmentationMethod]',      'NT=ETD;AC=MS:1001848'),   # already canonical
+        ('Comment[FragmentationMethod]',      'AC=MS:1001848;NT=ETD'),   # already canonical
         ('Comment[AcquisitionMethod]',        'data-dependent acquisition'),
         ('Comment[AcquisitionMethod]',        'DIA'),
         ('Comment[Separation]',               'nano LC'),
