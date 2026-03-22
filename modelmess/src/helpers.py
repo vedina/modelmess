@@ -178,17 +178,31 @@ def _parse_kv_string(s: str) -> dict:
     return result
 
 
-def parse_globals(raw_json: str) -> dict:
+def parse_globals(raw_json: str, resolve: bool = True) -> dict:
     """
     Parse globals JSON from LLM output.
-    Returns a plain dict — no Pydantic models.
-    Instrument and CleavageAgent stay as dicts or strings.
+    Returns a plain dict - no Pydantic models.
+
+    If resolve=True (default), passes the parsed dict through
+    resolve_globals_structure() in resolve.py to deterministically
+    canonicalise instrument, cleavage_agent, modification, and
+    plain-string CV fields.  Set resolve=False to get the raw LLM
+    dict for debugging or gold-label construction.
     """
     data = _safe_parse_json(clean_json(raw_json))
     if data is None:
         log.warning(f"globals parse failed. Raw snippet: {raw_json[:200]}")
         return {}
-    return _coerce_to_dict(data)
+    d = _coerce_to_dict(data)
+    if resolve:
+        try:
+            from resolve import resolve_globals_structure
+            d = resolve_globals_structure(d)
+        except ImportError:
+            log.debug("resolve.py not on path -- skipping structure resolution")
+        except Exception as e:
+            log.warning(f"resolve_globals_structure failed: {e} -- returning raw dict")
+    return d
 
 
 def parse_samples(raw_json: str, pxd: str = '') -> list:
