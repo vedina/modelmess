@@ -66,7 +66,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-
+import numpy as np
 import pandas as pd
 
 log = logging.getLogger('sdrf.refine')
@@ -695,7 +695,7 @@ class SDRFRefiner:
 # ---------------------------------------------------------------------------
 # BFRS optimiser
 # ---------------------------------------------------------------------------
-
+from IPython.display import display
 class SDRFRefineOptimiser:
     """
     Optimises SDRFRefiner using BootstrapFewShotWithRandomSearch.
@@ -735,7 +735,13 @@ class SDRFRefineOptimiser:
                           (f'Harmonized_{pxd}.csv',   ',')]:
             p = self.train_sdrf_dir / pat
             if p.exists():
-                return pd.read_csv(p, sep=sep, low_memory=False)
+                #print(f"{p} load")
+                gt_df = pd.read_csv(p, sep=sep, low_memory=False)
+                gt_df.replace("Not Applicable", np.nan, inplace=True)
+                return gt_df
+            else:
+                pass
+                #print(f"{p} does not exists")
         return None
 
     def _tsv_inner(self, col: str) -> str:
@@ -744,28 +750,35 @@ class SDRFRefineOptimiser:
             return m.group(1) + (m.group(2) or '')
         return col
 
+   
     def _build_examples(self, pxd_list: list) -> list:
         """Build dspy.Example list for optimiser."""
         import dspy
-        rules_sub = pd.read_csv(self.rules_sub_path)
+        rules_sub = pd.read_csv(self.rules_sub_path, low_memory=False)
         examples  = []
 
         for pxd in pxd_list:
             pub_text = _load_pub_text(pxd, self.pub_text_dir, self.cfg)
             if not pub_text:
+                print(f"No pub_text", pxd)
                 continue
             gt_df = self._load_gt_tsv(pxd)
+            gt_df.replace("Not Available", np.nan, inplace=True)
+            #display(gt_df.head())
             if gt_df is None or gt_df.empty:
+                print(f"No ground truth {pxd}")
                 continue
 
             pxd_rows = rules_sub[rules_sub['PXD'] == pxd]
             if pxd_rows.empty:
+                print(f"{pxd} rows empty")
                 continue
 
             cols_to_fix = _cols_to_fix(pxd_rows, self.cfg)
             if not cols_to_fix:
+                print(f"{pxd} not cols_to_fix")
                 continue
-
+            
             # Build current values from first rules row
             first = pxd_rows.iloc[0]
             current = {
@@ -780,17 +793,24 @@ class SDRFRefineOptimiser:
             gt_first  = gt_df.iloc[0]
             gold_corrections = {}
             for col in cols_to_fix:
+                
                 snake   = _COL_TO_SNAKE.get(col, col)
                 tsv_col = self._tsv_inner(col)
                 actual  = next(
                     (c for c in gt_df.columns
-                     if c.lower().replace(' ','') == tsv_col.lower().replace(' ','')),
+                     if c == col),
                     None)
                 if not actual:
+                    #print(f"{pxd} '{col}' not actual")
                     continue
+                #else:
+                    #print(f"{pxd} {col} actual")
                 gt_val = gt_first.get(actual)
                 if _is_empty(gt_val):
+                    #print(f"{pxd} {gt_val} is empty")
                     continue
+                #else:
+                #    print(f"{pxd} {actual} {gt_val} non empty")
                 # Simplify: extract NT= name for structured fields
                 gt_str = str(gt_val).strip()
                 if 'NT=' in gt_str:
@@ -799,8 +819,10 @@ class SDRFRefineOptimiser:
                 gold_corrections[snake] = gt_str
 
             if not gold_corrections:
+                print(f"{pxd} not gold_corrections")
                 continue
-
+            else:
+                print(f"{pxd} gold_corrections {gold_corrections}")
             snake_to_fix = list(dict.fromkeys(
                 'modification' if s.startswith('modification') else s
                 for s in [_COL_TO_SNAKE.get(c, c) for c in cols_to_fix]
@@ -853,12 +875,14 @@ class SDRFRefineOptimiser:
         import random
 
         rules_sub = pd.read_csv(self.rules_sub_path)
+        rules_sub.replace("Not Applicable", np.nan, inplace=True)
         available = sorted(rules_sub['PXD'].unique().tolist())
         rng = random.Random(seed)
         rng.shuffle(available)
         train_pxds = available[:n_train]
         val_pxds   = available[n_train:n_train + n_val]
 
+        print(f"Number of train_pxds {len(train_pxds)}")
         trainset = self._build_examples(train_pxds)
         valset   = self._build_examples(val_pxds)
 
