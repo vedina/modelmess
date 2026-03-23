@@ -521,3 +521,230 @@ def compare_submissions(*named_subs):
             all_agree = (m[cols_i].nunique(axis=1) == 1).mean()
             if all_agree < 0.8:
                 print(f"  {col:50} all_agree={all_agree:.0%}")
+
+
+def assign_char2factor(df: pd.DataFrame):
+    pattern = re.compile(r"\[([^\]]+)\]")
+    # Build mapping: key -> column name
+    factor_cols = {
+        pattern.search(col).group(1): col
+        for col in df.columns
+        if col.startswith("FactorValue[")
+    }
+    char_cols = {
+        pattern.search(col).group(1): col
+        for col in df.columns
+        if col.startswith("Characteristics[")
+    }
+    common_keys = factor_cols.keys() & char_cols.keys()
+    for key in common_keys:
+        df[factor_cols[key]] = df[char_cols[key]]    
+    return df
+
+
+# Define NA-like values
+NA_VALUES = {'not available', 'Not Applicable', 'not applicable', '', 'nan', 'NaN', 'NA', 'N/A', 'none', 'None'}
+
+
+def load_clean_rulesdf(file, columns=None):
+    df = pd.read_csv(file)
+    if columns is not None:
+        df = df.reindex(columns=columns)
+        df = df[columns]
+    df.replace("Not Applicable", np.nan, inplace=True)
+    return assign_char2factor(df)                
+
+
+def _is_na(v):
+    if pd.isna(v):
+        return True
+    return str(v).strip() in NA_VALUES
+
+
+# Function to get columns with at least one NA-like value
+def cols_with_na_like(df):
+    return [col for col in df.columns if df[col].apply(_is_na).any()]
+
+
+def constant_columns(df: pd.DataFrame, cardinality=1) -> list[str]:
+    """Return a list of columns that have the same value in all rows."""
+    return [col for col in df.columns if df[col].nunique(dropna=False) <=cardinality]
+
+
+def get_cols_by_type(cols : []):
+    pattern = re.compile(r"\[([^\]]+)\]")
+    result = {"FactorValue": [], "Characteristics" : [], "Comment": []}
+    # Build mapping: key -> column name
+    result["FactorValue"] = {
+        pattern.search(col).group(1): col
+        for col in cols
+        if col.startswith("FactorValue[")
+    }
+    result["Characteristics"] = {
+        pattern.search(col).group(1): col
+        for col in cols
+        if col.startswith("Characteristics[")
+    }
+    result["Comment"] = {
+        pattern.search(col).group(1): col
+        for col in cols
+        if col.startswith("Comment[")
+    }    
+    result["Other"] = [col for col in cols if not pattern.search(col)]
+    return result
+
+
+def compare_unique_values(df1: pd.DataFrame,
+                          df2: pd.DataFrame,
+                          cols,
+                          name1="df1",
+                          name2="df2",
+                          max_display: int = 10):
+    
+    for col in cols:
+        print(f"\n=== {col} ===")
+
+        if col not in df1.columns or col not in df2.columns:
+            print(f"Missing in one of the dataframes")
+            continue
+
+        s1 = pd.Series(df1[col].unique())
+        s2 = pd.Series(df2[col].unique())
+
+        set1 = set(s1)
+        set2 = set(s2)
+
+        only_1 = list(set1 - set2)
+        only_2 = list(set2 - set1)
+        common = list(set1 & set2)
+
+        def show(vals):
+            if len(vals) <= max_display:
+                return vals
+            return vals[:max_display] + [f"... (+{len(vals)-max_display} more)"]
+
+        print(f"{name1} unique ({len(set1)}): {show(list(set1))}")
+        print(f"{name2} unique ({len(set2)}): {show(list(set2))}")
+        print(f"common ({len(common)}): {show(common)}")
+        if len(only_1)>0:
+            print(f"only in {name1} ({len(only_1)}): {show(only_1)}")
+        if len(only_2)>0:
+            print(f"only in {name2} ({len(only_2)}): {show(only_2)}")
+
+
+def to_snake_case(col_name: str) -> str:
+    """
+    Convert a submission column name to snake_case similar to _COL_TO_SNAKE.
+    Examples:
+        'Characteristics[NumberOfSamples]' -> 'number_of_samples'
+        'Characteristics[Modification].2' -> 'modification_2'
+        'Comment[MS2MassAnalyzer]'         -> 'ms2_mass_analyzer'
+    """
+    # Step 1: Remove prefix before [ and keep what's inside
+    m = re.match(r'(?:\w+)\[(.+?)\](?:\.(\d+))?', col_name)
+    if m:
+        base, number = m.groups()
+        s = base
+        if number:
+            s += f"_{number}"
+    else:
+        s = col_name
+
+    # Step 2: Convert CamelCase or PascalCase to snake_case
+    s = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', s)
+    s = re.sub(r'([a-z\d])([A-Z])', r'\1_\2', s)
+    s = s.replace('-', '_')
+    
+    # Step 3: lowercase everything
+    return s.lower()
+                
+
+SCHEMA_DICT: dict[str, str] = {
+    # CHARACTERISTICS
+    "age": "Age of the donor or developmental stage of the organism (e.g. '45 years', 'E14.5 embryo')",
+    "alkylation_reagent": "A chemical (like Iodoacetamide (IAA) or N-ethylmaleimide (NEM)) that irreversibly adds an alkyl group to the free sulfhydryl (-SH) of cysteine residues, blocking disulfide bonds and preventing protein re-folding",
+    "anatomic_site_tumor": "Anatomical location from which a tumor sample was taken (e.g. 'left lung lobe')",
+    "ancestry_category": "Donor ancestry or ethnicity category (e.g. 'European', 'East Asian')",
+    "bait": "The protein or molecule used as bait in an affinity-purification experiment",
+    "bmi": "Body-Mass Index of the donor (kg/m²)",
+    "biological_replicate": "Identifier for biological replicates (e.g. 'bioRep1', 'bioRep2')",
+    "cell_line": "Name of the immortalized cell line (e.g. 'HEK293T', 'U2OS')",
+    "cell_part": "Subcellular compartment or fraction (e.g. 'nucleus', 'mitochondria')",
+    "cell_type": "Primary cell type or lineage (e.g. 'neurons', 'fibroblasts')",
+    "cleavage_agent": "Protease or chemical used to digest proteins (e.g. 'trypsin', 'chymotrypsin')",
+    "compound": "Chemical or small molecule added to the sample (e.g. drug, inhibitor) as a perturbation agent",
+    "concentration_of_compound": "Concentration of the Compound used (e.g. '10 µM')",
+    "concentration_of_compound_1": "Additional Concentration of the Compound used (e.g. '10 µM')",
+    "depletion": "Method used to remove high-abundance proteins (e.g. 'albumin depletion kit')",
+    "developmental_stage": "Stage of development for the sample source (e.g. 'adult', 'P7 pup')",
+    "disease": "Disease state or diagnosis (e.g. 'breast cancer', 'Type 2 diabetes')",
+    "disease_treatment": "Pre-treatment applied to diseased samples (e.g. 'chemotherapy', 'radiation')",
+    "genetic_modification": "Any genetic alteration in the source organism/cells (e.g. 'GFP-tagged', 'knockout of gene X')",
+    "genotype": "Genotypic background (e.g. 'C57BL/6J', 'BRCA1-mutant')",
+    "growth_rate": "Doubling time or growth rate of cell cultures (e.g. '24 h doubling')",
+    "label": "Isobaric or metabolic label applied (e.g. 'TMT-126', 'SILAC heavy')",
+    "material_type": "Broad class of material (e.g. 'tissue', 'cell line', 'biofluid')",
+    "modification": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
+    "modification_3": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
+    "modification_4": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
+    "modification_5": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
+    "modification_6": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
+    "number_of_biological_replicates": "Total number of biological replicates in the study for samples of the same context (not per-sample)",
+    "number_of_samples": "Total number of samples processed in total in the study (not per-sample)",
+    "number_of_technical_replicates": "Total number of technical replicates for the sample",
+    "organism": "Source species (NCBI Taxonomy ID and name, e.g. '9606 (Homo sapiens)')",
+    "organism_part": "Tissue or organ of origin (Uberon term, e.g. 'UBERON:0002107 (liver)')",
+    "origin_site_disease": "Anatomical site of disease origin (e.g. 'colon', 'prostate')",
+    "pooled_sample": "Indicates if multiple samples were pooled (e.g. 'pool1 of reps1–3')",
+    "reduction_reagent": "Chemical used to reduce disulfide bonds (e.g. 'DTT', 'TCEP')",
+    "sampling_time": "Time point of sample collection (e.g. 'T0', '24 h post-treatment')",
+    "sex": "Donor sex (e.g. 'male', 'female')",
+    "specimen": "Description of biological specimen (e.g. 'biopsy', 'plasma')",
+    "spiked_compound": "Exogenous standard or spike-in added (e.g. 'iRT peptides')",
+    "staining": "Any staining applied to the sample prior to mass spec that may still be present in the sample",
+    "strain": "Animal strain (e.g. 'BALB/c', 'FVB/N')",
+    "synthetic_peptide": "Indicates a synthetic peptide sample (e.g. 'synthetic phosphopeptide')",
+    "technical_replicate": "Identifier for technical replicates (e.g. 'techRep1', 'techRep2')",
+    "temperature": "Growth temperature of the samples or perturbation temperature if a differential study",
+    "time": "Broad time parameter (e.g. 'day 5', 'week 2')",
+    "treatment": "Experimental treatment (e.g. 'drug X 5 µM 24 h')",
+    "tumor_cellularity": "Percentage of tumor cells in the sample (e.g. '80%')",
+    "tumor_grade": "Histological grade (e.g. 'Grade II')",
+    "tumor_size": "Physical size of the tumor (e.g. '3 cm diameter')",
+    "tumor_site": "Anatomical site of tumor (e.g. 'breast', 'pancreas')",
+    "tumor_stage": "Clinical staging (e.g. 'Stage III')",
+
+    # COMMENT
+    "acquisition_method": "MS acquisition scheme (e.g. 'DDA', 'DIA', 'PRM')",
+    "collision_energy": "Collision energy applied in MS/MS (e.g. '27 eV')",
+    "enrichment_method": "Peptide/enrichment protocol used (e.g. 'TiO₂ phosphopeptide enrichment')",
+    "flow_rate_chromatogram": "LC flow rate (e.g. '300 nL/min')",
+    "fractionation_method": "Any off-line method used to fraction bulk sample into the primary samples used in the MS or LC/MS",
+    "fraction_identifier": "Numeric or text ID of each fraction (e.g. 'F1', 'F2')",
+    "fragmentation_method": "Ion-fragmentation technique (e.g. 'HCD', 'CID', 'ETD')",
+    "fragment_mass_tolerance": "Mass tolerance for fragment matching (e.g. '0.02 Da')",
+    "gradient_time": "Total LC gradient length (e.g. '120 min')",
+    "instrument": "Mass spec make/model (e.g. 'Thermo Q-Exactive Plus')",
+    "ionization_type": "Ionization source (e.g. 'nanoESI', 'MALDI')",
+    "ms2_mass_analyzer": "Analyzer used for MS2 (e.g. 'orbitrap', 'ion trap')",
+    "number_of_missed_cleavages": "Max missed cleavages allowed in database search (e.g. '2')",
+    "number_of_fractions": "Total number of fractions generated from each sample",
+    "precursor_mass_tolerance": "Mass tolerance for precursor matching (e.g. '10 ppm')",
+    "separation": "Any on-line method used to separate the samples into fractions right before MS",
+    
+   "factor_bait"                   :  "Experimental factor: protein or molecule used as bait in affinity-purification",
+    "factor_cell_part"               :  "Experimental factor: subcellular compartment or fraction (e.g. 'nucleus', 'mitochondria')",
+    "factor_compound"                :  "Experimental factor:chemical or small molecule used as perturbation",
+    "factor_concentration_of_compound_1":  "Experimental factor:concentration of the compound in the sample (e.g. 10 µM)",
+    "factor_fraction_identifier"     :  "Experimental factor: numeric/text ID of each fraction",
+    "factor_genetic_modification"    :  "Experimental factor:genetic alteration (e.g. 'GFP-tagged', 'knockout of gene X')",
+    "factor_temperature"             :  "Experimental factor: experimental or perturbation temperature",
+    "factor_treatment"               :  "Experimental factor: experimental treatment applied",
+    "factor_chemical_entity"         :  "Experimental factor: chemical entity applied to sample",
+    "factor_induced_by"              :  "Experimental factor: stimulus/agent inducing the condition",
+    "factor_isolation_width"         :  "Experimental factor: MS isolation width parameter",
+    "factor_multiplicities_of_infection" :  "Experimental factor: infection MOI (e.g. 1, 5)",
+    "factor_overproduction"          :  "Experimental factor: protein overexpression condition",
+    "factor_overproduction_1"        :  "Experimental factor: secondary overproduction (if multiple)",
+    "factor_protocol"                :  "Experimental factor: experimental protocol or procedure" 
+}
