@@ -688,7 +688,6 @@ SCHEMA_DICT: dict[str, str] = {
     "modification_1": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
     "modification_2": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
     "modification_3": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
-    "modification_3": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
     "modification_4": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
     "modification_5": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
     "modification_6": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
@@ -779,19 +778,18 @@ SAMPLE_FIELD_MODULES = {
     "pooled_sample": "disease",
     "disease": "disease",
     "growth_rate": "disease",
+    "disease_treatment": "disease",
 
     # Module 4 — Treatment / Experiment Conditions
     "cell_line": "treatment",
     "cell_type": "treatment",
     "cell_part": "treatment",
     "material_type": "treatment",
-    "biological_replicate": "treatment",
     "treatment": "treatment",
     "compound": "treatment",
     "concentration_of_compound": "treatment",
     "temperature": "treatment",
     "time": "treatment",
-    "disease_treatment": "treatment",
     "sampling_time": "treatment",
     "spiked_compound": "treatment",
     "depletion": "treatment",
@@ -814,7 +812,9 @@ SAMPLE_FIELD_MODULES = {
     "modification_6": "prep_chemistry",
     "number_of_samples": "prep_chemistry",
     "number_of_technical_replicates": "prep_chemistry" 
-   
+   "label" : "prep_chemistry" ,
+       "number_of_biological_replicates": "prep_chemistry",
+     "biological_replicate": "prep_chemistry",
 
 }
 
