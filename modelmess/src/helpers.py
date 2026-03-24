@@ -811,7 +811,7 @@ SAMPLE_FIELD_MODULES = {
     "modification_5": "prep_chemistry",
     "modification_6": "prep_chemistry",
     "number_of_samples": "prep_chemistry",
-    "number_of_technical_replicates": "prep_chemistry" 
+    "number_of_technical_replicates": "prep_chemistry" ,
    "label" : "prep_chemistry" ,
        "number_of_biological_replicates": "prep_chemistry",
      "biological_replicate": "prep_chemistry",
