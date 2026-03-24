@@ -685,6 +685,9 @@ SCHEMA_DICT: dict[str, str] = {
     "label": "Isobaric or metabolic label applied (e.g. 'TMT-126', 'SILAC heavy')",
     "material_type": "Broad class of material (e.g. 'tissue', 'cell line', 'biofluid')",
     "modification": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
+    "modification_1": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
+    "modification_2": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
+    "modification_3": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
     "modification_3": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
     "modification_4": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
     "modification_5": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
@@ -775,13 +778,13 @@ SAMPLE_FIELD_MODULES = {
     "specimen": "tissue_tumor",
     "pooled_sample": "tissue_tumor",
 
-    # Module 3 — Cell / Material Type
-    "cell_line": "cell_material",
-    "cell_type": "cell_material",
-    "cell_part": "cell_material",
-    "material_type": "cell_material",
-
     # Module 4 — Treatment / Experiment Conditions
+    "cell_line": "treatment",
+    "cell_type": "treatment",
+    "cell_part": "treatment",
+    "material_type": "treatment",
+    "number_of_biological_replicates": "treatment",
+
     "treatment": "treatment",
     "compound": "treatment",
     "concentration_of_compound": "treatment",
@@ -795,16 +798,22 @@ SAMPLE_FIELD_MODULES = {
     "label": "treatment",
     "synthetic_peptide": "treatment",
 
+
     # Module 5 — Sample Preparation / Chemistry
     "cleavage_agent": "prep_chemistry",
     "reduction_reagent": "prep_chemistry",
     "alkylation_reagent": "prep_chemistry",
     "modification": "prep_chemistry",
+    "modification_1": "prep_chemistry",
+    "modification_2": "prep_chemistry",
+    "modification_3": "prep_chemistry",
+    "modification_4": "prep_chemistry",
+    "modification_5": "prep_chemistry",
+    "modification_6": "prep_chemistry",
+    "number_of_samples": "prep_chemistry",
+    "number_of_technical_replicates": "prep_chemistry" 
+   
 
-    # Module 6 — Replicates / Numbers
-    "number_of_samples": "replicates",
-    "number_of_biological_replicates": "replicates",
-    "number_of_technical_replicates": "replicates"
 }
 
 GLOBAL_FIELD_MODULES = {
@@ -825,8 +834,8 @@ GLOBAL_FIELD_MODULES = {
     "number_of_fractions": "chromatography",
 
     # Experiment-level — Search / digestion
-    "precursor_mass_tolerance": "search_params",
-    "fragment_mass_tolerance": "search_params",
-    "number_of_missed_cleavages": "search_params",
-    "enrichment_method": "search_params",
+    "precursor_mass_tolerance": "ms_instrument",
+    "fragment_mass_tolerance": "ms_instrument",
+    "number_of_missed_cleavages": "ms_instrument",
+    "enrichment_method": "ms_instrument"
 }
