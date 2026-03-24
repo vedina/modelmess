@@ -748,3 +748,85 @@ SCHEMA_DICT: dict[str, str] = {
     "factor_overproduction_1"        :  "Experimental factor: secondary overproduction (if multiple)",
     "factor_protocol"                :  "Experimental factor: experimental protocol or procedure" 
 }
+
+
+# Modules - will be optimised separately
+# Sample-level field → module mapping
+SAMPLE_FIELD_MODULES = {
+    # Module 1 — Basic Demographics / Organism Info
+    "age": "demographics",
+    "sex": "demographics",
+    "bmi": "demographics",
+    "developmental_stage": "demographics",
+    "strain": "demographics",
+    "genotype": "demographics",
+    "ancestry_category": "demographics",
+    "organism": "demographics",
+    "organism_part": "demographics",
+
+    # Module 2 — Sample Source / Tissue / Tumor
+    "anatomic_site_tumor": "tissue_tumor",
+    "tumor_site": "tissue_tumor",
+    "tumor_stage": "tissue_tumor",
+    "tumor_grade": "tissue_tumor",
+    "tumor_size": "tissue_tumor",
+    "tumor_cellularity": "tissue_tumor",
+    "origin_site_disease": "tissue_tumor",
+    "specimen": "tissue_tumor",
+    "pooled_sample": "tissue_tumor",
+
+    # Module 3 — Cell / Material Type
+    "cell_line": "cell_material",
+    "cell_type": "cell_material",
+    "cell_part": "cell_material",
+    "material_type": "cell_material",
+
+    # Module 4 — Treatment / Experiment Conditions
+    "treatment": "treatment",
+    "compound": "treatment",
+    "concentration_of_compound": "treatment",
+    "temperature": "treatment",
+    "time": "treatment",
+    "disease_treatment": "treatment",
+    "sampling_time": "treatment",
+    "spiked_compound": "treatment",
+    "depletion": "treatment",
+    "staining": "treatment",
+    "label": "treatment",
+    "synthetic_peptide": "treatment",
+
+    # Module 5 — Sample Preparation / Chemistry
+    "cleavage_agent": "prep_chemistry",
+    "reduction_reagent": "prep_chemistry",
+    "alkylation_reagent": "prep_chemistry",
+    "modification_6": "prep_chemistry",
+
+    # Module 6 — Replicates / Numbers
+    "number_of_samples": "replicates",
+    "number_of_biological_replicates": "replicates",
+    "number_of_technical_replicates": "replicates"
+}
+
+GLOBAL_FIELD_MODULES = {
+    # Experiment-level — MS / instrument
+    "instrument": "ms_instrument",
+    "acquisition_method": "ms_instrument",
+    "fragmentation_method": "ms_instrument",
+    "ms2_mass_analyzer": "ms_instrument",
+    "ionization_type": "ms_instrument",
+    "collision_energy": "ms_instrument",
+
+    # Experiment-level — LC / separation
+    "flow_rate_chromatogram": "chromatography",
+    "gradient_time": "chromatography",
+    "separation": "chromatography",
+    "fraction_identifier": "chromatography",
+    "fractionation_method": "chromatography",
+    "number_of_fractions": "chromatography",
+
+    # Experiment-level — Search / digestion
+    "precursor_mass_tolerance": "search_params",
+    "fragment_mass_tolerance": "search_params",
+    "number_of_missed_cleavages": "search_params",
+    "enrichment_method": "search_params",
+}
