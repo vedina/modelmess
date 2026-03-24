@@ -768,23 +768,24 @@ SAMPLE_FIELD_MODULES = {
     "organism_part": "demographics",
 
     # Module 2 — Sample Source / Tissue / Tumor
-    "anatomic_site_tumor": "tissue_tumor",
-    "tumor_site": "tissue_tumor",
-    "tumor_stage": "tissue_tumor",
-    "tumor_grade": "tissue_tumor",
-    "tumor_size": "tissue_tumor",
-    "tumor_cellularity": "tissue_tumor",
-    "origin_site_disease": "tissue_tumor",
-    "specimen": "tissue_tumor",
-    "pooled_sample": "tissue_tumor",
+    "anatomic_site_tumor": "disease",
+    "tumor_site": "disease",
+    "tumor_stage": "disease",
+    "tumor_grade": "disease",
+    "tumor_size": "disease",
+    "tumor_cellularity": "disease",
+    "origin_site_disease": "disease",
+    "specimen": "disease",
+    "pooled_sample": "disease",
+    "disease": "disease",
+    "growth_rate": "disease",
 
     # Module 4 — Treatment / Experiment Conditions
     "cell_line": "treatment",
     "cell_type": "treatment",
     "cell_part": "treatment",
     "material_type": "treatment",
-    "number_of_biological_replicates": "treatment",
-
+    "biological_replicate": "treatment",
     "treatment": "treatment",
     "compound": "treatment",
     "concentration_of_compound": "treatment",
@@ -797,7 +798,8 @@ SAMPLE_FIELD_MODULES = {
     "staining": "treatment",
     "label": "treatment",
     "synthetic_peptide": "treatment",
-
+    "genetic_modification": "treatment",
+    "bait": "treatment",
 
     # Module 5 — Sample Preparation / Chemistry
     "cleavage_agent": "prep_chemistry",
