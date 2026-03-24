@@ -571,26 +571,31 @@ def constant_columns(df: pd.DataFrame, cardinality=1) -> list[str]:
     return [col for col in df.columns if df[col].nunique(dropna=False) <=cardinality]
 
 
-def get_cols_by_type(cols : []):
-    pattern = re.compile(r"\[([^\]]+)\]")
-    result = {"FactorValue": [], "Characteristics" : [], "Comment": []}
-    # Build mapping: key -> column name
-    result["FactorValue"] = {
-        pattern.search(col).group(1): col
-        for col in cols
-        if col.startswith("FactorValue[")
+def get_cols_by_type(cols: list[str]):
+    pattern = re.compile(r"\[([^\]]+)\](?:\.(\w+))?")
+    result = {
+        "FactorValue": {},
+        "Characteristics": {},
+        "Comment": {},
+        "Other": []
     }
-    result["Characteristics"] = {
-        pattern.search(col).group(1): col
-        for col in cols
-        if col.startswith("Characteristics[")
-    }
-    result["Comment"] = {
-        pattern.search(col).group(1): col
-        for col in cols
-        if col.startswith("Comment[")
-    }    
-    result["Other"] = [col for col in cols if not pattern.search(col)]
+    for col in cols:
+        match = pattern.search(col)
+        if not match:
+            result["Other"].append(col)
+            continue
+        key = match.group(1)
+        suffix = match.group(2)
+        if suffix:
+            key = f"{key}_{suffix}"
+        if col.startswith("FactorValue["):
+            result["FactorValue"][key] = col
+        elif col.startswith("Characteristics["):
+            result["Characteristics"][key] = col
+        elif col.startswith("Comment["):
+            result["Comment"][key] = col
+        else:
+            result["Other"].append(col)
     return result
 
 
