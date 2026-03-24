@@ -799,7 +799,7 @@ SAMPLE_FIELD_MODULES = {
     "cleavage_agent": "prep_chemistry",
     "reduction_reagent": "prep_chemistry",
     "alkylation_reagent": "prep_chemistry",
-    "modification_6": "prep_chemistry",
+    "modification": "prep_chemistry",
 
     # Module 6 — Replicates / Numbers
     "number_of_samples": "replicates",
