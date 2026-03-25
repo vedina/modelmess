@@ -1,0 +1,13 @@
+[project]
+name = "files"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "langchain>=1.2.13",
+    "langchain-core>=1.2.22",
+    "langchain-openai>=1.1.12",
+    "openai>=1.40.0",
+    "pydantic>=2.0.0",
+]
