@@ -10,6 +10,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional
+import json
 
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -151,65 +152,30 @@ HEADER_TO_FIELD = {
 }
 
 # ── System prompt ─────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are a proteomics metadata extraction expert. 
-Your task is to read scientific paper text - METHODS , ABSTRACT, TITLE sections - AND a provided list of MS .raw filenames and compile metadata in the SDRF (Sample and Data Relationship Format) for proteomics experiments.
+SYSTEM_PROMPT = """
+Read the provided proteomics publication and list of mass spectrometry .raw filenames and compile metadata for metadata in the SDRF (Sample and Data Relationship Format) for the proteomics experiment.
+1) experiment-level metadata shared across ALL samples.
+2) sample level metadata for each biological object or condition
 
 SDRF STRUCTURE (definitions)
 1. One SDRF row represents one sample–data file relationship.
-2. For each row, populate every field you can find evidence for in the text.
-3. Use "not applicable" for fields with no relevant data (e.g. tumor fields for non-cancer studies).
+2. For each row, populate every field you can find or INFER evidence for in the text.
+3. Use "Not Applicable" for fields with no relevant data (e.g. tumor fields for non-cancer studies).
 4. Biological replicate: infer from replicate numbering in filenames or text (e.g. _rep1, -1-, triplicate).
 5. Modifications: list fixed mods first, then variable mods across Modification columns.
-6. Temperature: use numeric value only (e.g. "37" not "37°C") for heat-treatment studies.
-7. Label: use "label free sample", "TMT", "iTRAQ", "SILAC" etc. as appropriate.
-8. Factor values should reflect the PRIMARY experimental variable(s) that differ between samples.
-10. Usage: always "raw" for raw MS files.
+6. Factor values should reflect the PRIMARY experimental variable(s) that differ between samples.
 
 FILENAME-AWARE MAPPING (RAW_FILES)
 You MUST use RAW_FILES to help assign metadata to each sample/file:
-1) Parse each .raw name into tokens split on [_ . -] and preserve exact substrings.
-2) Identify explicit filename cues that may indicate:
-   - fractions (e.g., “F1”, “Frac03”, “fraction7”) -> Comment[FractionIdentifier]
-   - technical replicate markers (e.g., “TR1”, “TechRep2”, “inj3”) -> Characteristics[TechnicalReplicate]
-   - biological replicate markers (e.g., “BR1”, “BioRep3”, “rep2”) -> Characteristics[BiologicalReplicate] ONLY if manuscript supports that token meaning
-   - timepoints (e.g., “0h”, “24h”, “day5”) -> FactorValue[Time] or Characteristics[Time] depending on study-variable rule above
-   - condition markers (e.g., “CTRL”, “WT”, “KO”, “drugX”) -> FactorValue[Treatment] ONLY if token is self-descriptive AND matches manuscript terminology
-   - labels (e.g., “TMT126”, “TMT-131N”, “SILAC”) -> Characteristics[Label]
-3) Use filename cues to DISAMBIGUATE which samples get which conditions when the manuscript describes multiple conditions.
-4) Do NOT hallucinate manuscript text. If a cue is ONLY in filenames, you may include it ONLY as an exact token span from the filename and ONLY if it is self-descriptive.
+   - fractions (e.g., “F1”, “Frac03”, “fraction7”) -> fraction_identifier
+   - technical replicate markers (e.g., “TR1”, “TechRep2”, “inj3”) -> technical_replicate
+   - biological replicate markers (e.g., “BR1”, “BioRep3”, “rep2”) -> biological_replicate ONLY if manuscript supports that token meaning
+   - timepoints (e.g., “0h”, “24h”, “day5”) -> FactorValue[Time] or time depending on study-variable rule above
+   - condition markers (e.g., “CTRL”, “WT”, “KO”, “drugX”) -> treatment ONLY if token is self-descriptive AND matches manuscript terminology
+   - labels (e.g., “TMT126”, “TMT-131N”, “SILAC”) -> label
+Use filename cues to DISAMBIGUATE which samples get which conditions when the manuscript describes multiple conditions.
 
-EXTRACTION PROCESS (TWO-ROUND VERIFICATION)
-
-ROUND 1 — Liberal Candidate Harvest
-A) From MANUSCRIPT_TEXT (in-scope sections only):
-- Collect candidate spans for ANY allowed category above.
-- Save triples: (sdrf_key, exact_span, source="manuscript").
-
-B) From RAW_FILES:
-- Collect only explicit self-descriptive tokens and map to allowed categories.
-- Save triples: (sdrf_key, exact_span, source="filename", raw_file=...).
-
-ROUND 2 — Strict Filtering
-- Remove ambiguous candidates.
-- Remove duplicates: same sdrf_key + same exact_span + same source (keep once).
-- Prefer manuscript-derived spans over filename-derived spans when both represent the same concept.
-- Keep only high-confidence matches.
-
-PER-FILE ASSIGNMENT LOGIC
-1) Build GLOBAL_METADATA: spans that clearly apply to all files (often Comment[Instrument], Comment[AcquisitionMethod], Characteristics[CleavageAgent], etc.).
-2) For each raw file:
-   - Start with GLOBAL_METADATA.
-   - Add per-file spans from filename cues (fractions/replicates/labels/timepoints/conditions).
-   - Add condition/time/treatment spans that match that file’s tokens and manuscript wording.
-3) It is OK if many files share identical metadata (apply globally when true).
-
-Rules for Source Name / Assay Name generation:
-- Source Name: stable ID for the biological starting material context; group files by shared sample tokens when possible.
-- Assay Name: must be unique per raw file (recommend deterministic: <SourceName>_<suffix derived from fraction/techrep/label>).
-
-OUTPUT FORMAT (STRICT JSON ONLY)
 Return exactly one JSON object.
-
 Return ONLY valid JSON matching the schema. No markdown, no explanation outside the JSON."""
 
 HUMAN_PROMPT = """Extract SDRF metadata from the following paper text.
@@ -375,6 +341,40 @@ class SDRFPipeline:
         paper_text = input_path.read_text(encoding="utf-8")
         doc = self.extract(paper_text)
         return self.to_csv(doc, output_path)
+
+    def prepare_text_for_submission(self, json_path, max_length=None):
+        """
+        Extracts TITLE, METHODS, and ABSTRACT from a JSON file and concatenates them.
+        Optionally truncates the text to max_length characters.
+        
+        Args:
+            json_path (str): Path to the JSON file.
+            max_length (int, optional): Maximum length of the output text.
+            
+        Returns:
+            str: Concatenated text.
+        """
+        # Load JSON
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Extract fields safely
+        title = data.get("TITLE", "").strip()
+        methods = data.get("METHODS", "").strip()
+        abstract = data.get("ABSTRACT", "").strip()
+        
+        # Combine fields
+        text = f"Title: {title}\n\nAbstract: {abstract}\n\nMethods: {methods}"
+        
+        # Apply length limit if specified
+        if max_length is not None and len(text) > max_length:
+            text = text[:max_length].rsplit(' ', 1)[0] + '...'  # avoid cutting in the middle of a word
+        
+        return text
+
+    # Example usage:
+    # text_to_submit = prepare_text_for_submission("path/to/file.json", max_length=4000)
+    # print(text_to_submit)
 
     def process_batch(self, input_dir: str | Path, output_dir: str | Path) -> list[Path]:
         """Process all .txt files in a directory. Returns list of output paths."""
