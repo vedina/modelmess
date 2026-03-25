@@ -5,6 +5,14 @@ No Pydantic dependency — works standalone.
 import re
 import json
 import logging
+import os
+import pandas as pd
+from collections import defaultdict
+from typing import List, Dict
+import difflib
+import numpy as np
+from sklearn.cluster import AgglomerativeClustering
+
 
 log = logging.getLogger('sdrf')
 
@@ -271,8 +279,6 @@ def load_sdrf(sdrf_df: pd.DataFrame) -> Dict[str, Dict[str, List[str]]]:
    
     return sdrf_dict
 
-
-import difflib
 
 def _string_similarity(a: str, b: str) -> float:
     """Return similarity in [0,1] using difflib.SequenceMatcher (pure stdlib)."""
@@ -666,27 +672,27 @@ def to_snake_case(col_name: str) -> str:
 
 SCHEMA_DICT: dict[str, str] = {
     # CHARACTERISTICS
-    "age": "Age of the donor or developmental stage of the organism (e.g. '45 years', 'E14.5 embryo')",
+    "age": "Age of the donor or developmental stage of the organism (e.g. '45 years', 'E14.5 embryo', '4281D')",
     "alkylation_reagent": "A chemical (like Iodoacetamide (IAA) or N-ethylmaleimide (NEM)) that irreversibly adds an alkyl group to the free sulfhydryl (-SH) of cysteine residues, blocking disulfide bonds and preventing protein re-folding",
     "anatomic_site_tumor": "Anatomical location from which a tumor sample was taken (e.g. 'left lung lobe')",
     "ancestry_category": "Donor ancestry or ethnicity category (e.g. 'European', 'East Asian')",
-    "bait": "The protein or molecule used as bait in an affinity-purification experiment",
+    "bait": "The protein or molecule used as bait in an affinity-purification experiment (e.g. EGFP, nsp1)",
     "bmi": "Body-Mass Index of the donor (kg/m²)",
     "biological_replicate": "Identifier for biological replicates (e.g. 'bioRep1', 'bioRep2')",
     "cell_line": "Name of the immortalized cell line (e.g. 'HEK293T', 'U2OS')",
-    "cell_part": "Subcellular compartment or fraction (e.g. 'nucleus', 'mitochondria')",
-    "cell_type": "Primary cell type or lineage (e.g. 'neurons', 'fibroblasts')",
+    "cell_part": "Subcellular compartment or fraction (e.g. 'Cytosol' 'Mitochondrion' 'Nucleus')",
+    "cell_type": "Primary cell type or lineage (e.g. 'neurons', 'fibroblasts',)",
     "cleavage_agent": "Protease or chemical used to digest proteins (e.g. 'trypsin', 'chymotrypsin')",
-    "compound": "Chemical or small molecule added to the sample (e.g. drug, inhibitor) as a perturbation agent",
+    "compound": "Chemical or small molecule added to the sample (e.g.  'CDK7 inhibitor THZ1' , 'control') as a perturbation agent",
     "concentration_of_compound": "Concentration of the Compound used (e.g. '10 µM')",
     "concentration_of_compound_1": "Additional Concentration of the Compound used (e.g. '10 µM')",
-    "depletion": "Method used to remove high-abundance proteins (e.g. 'albumin depletion kit')",
+    "depletion": "Method used to remove high-abundance proteins (e.g. 'albumin depletion kit',  'no depletion' )",
     "developmental_stage": "Stage of development for the sample source (e.g. 'adult', 'P7 pup')",
     "disease": "Disease state or diagnosis (e.g. 'breast cancer', 'Type 2 diabetes')",
     "disease_treatment": "Pre-treatment applied to diseased samples (e.g. 'chemotherapy', 'radiation')",
     "genetic_modification": "Any genetic alteration in the source organism/cells (e.g. 'GFP-tagged', 'knockout of gene X')",
     "genotype": "Genotypic background (e.g. 'C57BL/6J', 'BRCA1-mutant')",
-    "growth_rate": "Doubling time or growth rate of cell cultures (e.g. '24 h doubling')",
+    "growth_rate": "Doubling time or growth rate of cell cultures (e.g. '24 h doubling', 'medium', 'fast')",
     "label": "Isobaric or metabolic label applied (e.g. 'TMT-126', 'SILAC heavy')",
     "material_type": "Broad class of material (e.g. 'tissue', 'cell line', 'biofluid')",
     "modification": "Post-translational modification enrichment or tagging (e.g. 'phosphorylation', 'ubiquitination')",
@@ -704,17 +710,17 @@ SCHEMA_DICT: dict[str, str] = {
     "origin_site_disease": "Anatomical site of disease origin (e.g. 'colon', 'prostate')",
     "pooled_sample": "Indicates if multiple samples were pooled (e.g. 'pool1 of reps1–3')",
     "reduction_reagent": "Chemical used to reduce disulfide bonds (e.g. 'DTT', 'TCEP')",
-    "sampling_time": "Time point of sample collection (e.g. 'T0', '24 h post-treatment')",
+    "sampling_time": "Time point of sample collection (e.g. 'T0', '24 h post-treatment', '52W')",
     "sex": "Donor sex (e.g. 'male', 'female')",
     "specimen": "Description of biological specimen (e.g. 'biopsy', 'plasma')",
-    "spiked_compound": "Exogenous standard or spike-in added (e.g. 'iRT peptides')",
+    "spiked_compound": "Exogenous standard or spike-in added (e.g. CT=mixture;QY=10 amol;CN=UPS1;CV=Standards Research Group')",
     "staining": "Any staining applied to the sample prior to mass spec that may still be present in the sample",
     "strain": "Animal strain (e.g. 'BALB/c', 'FVB/N')",
     "synthetic_peptide": "Indicates a synthetic peptide sample (e.g. 'synthetic phosphopeptide')",
     "technical_replicate": "Identifier for technical replicates (e.g. 'techRep1', 'techRep2')",
-    "temperature": "Growth temperature of the samples or perturbation temperature if a differential study",
-    "time": "Broad time parameter (e.g. 'day 5', 'week 2')",
-    "treatment": "Experimental treatment (e.g. 'drug X 5 µM 24 h')",
+    "temperature": "Growth temperature of the samples or perturbation temperature if a differential study e.g. (30)",
+    "time": "Broad time parameter (e.g. 'day 5', 'week 2',  '7 days' ,'30m' )",
+    "treatment": "Experimental treatment (e.g. 'control', 'heat shock', 'proteasome inhibitor MG-132')",
     "tumor_cellularity": "Percentage of tumor cells in the sample (e.g. '80%')",
     "tumor_grade": "Histological grade (e.g. 'Grade II')",
     "tumor_size": "Physical size of the tumor (e.g. '3 cm diameter')",
@@ -846,3 +852,95 @@ GLOBAL_FIELD_MODULES = {
     "number_of_missed_cleavages": "ms_instrument",
     "enrichment_method": "ms_instrument"
 }
+
+# expansion dict
+def build_clusters(values: List[str], threshold: float = 0.8) -> List[List[str]]:
+    if not values:
+        return []
+
+    values = [v.strip() for v in values if v and v.strip()]
+    N = len(values)
+    if N == 1:
+        return [values]
+
+    dist = np.zeros((N, N), dtype=float)
+    for i in range(N):
+        for j in range(i + 1, N):
+            sim = _string_similarity(values[i], values[j])
+            d = 1.0 - sim
+            dist[i, j] = d
+            dist[j, i] = d
+
+    clusterer = AgglomerativeClustering(
+        n_clusters=None,
+        metric='precomputed',
+        linkage='average',
+        distance_threshold=1.0 - threshold
+    )
+    labels = clusterer.fit_predict(dist)
+
+    clusters: Dict[int, List[str]] = defaultdict(list)
+    for val, lbl in zip(values, labels):
+        clusters[lbl].append(val)
+
+    return list(clusters.values())
+
+
+# --- Build expansion dictionaries per column ---
+def build_column_expansion_dict(folder_path: str, file_pattern: str = ".csv", threshold: float = 0.8) -> Dict[str, Dict[str, List[str]]]:
+    """
+    Returns a dict mapping column_name -> expansion_dict (key -> list of variants).
+    """
+    accumulated: Dict[str, set] = defaultdict(set)
+
+    # Step 1: accumulate unique values per column across all files
+    for fname in os.listdir(folder_path):
+        if not fname.endswith(file_pattern):
+            continue
+        fpath = os.path.join(folder_path, fname)
+        df = pd.read_csv(fpath)
+
+        for col in df.columns:
+            if col in ['Raw Data File', 'Usage', 'PXD']:
+                continue
+            vals = df[col].dropna().astype(str).unique()
+            accumulated[col].update(vals)
+
+    # Step 2: cluster values per column and build expansion dictionaries
+    column_expansions: Dict[str, Dict[str, List[str]]] = {}
+    for col, vals in accumulated.items():
+        clusters = build_clusters(list(vals), threshold=threshold)
+        expansion_dict: Dict[str, List[str]] = defaultdict(list)
+        for cluster in clusters:
+            for v in cluster:
+                key = v.lower()
+                for other in cluster:
+                    if other != v and other not in expansion_dict[key]:
+                        expansion_dict[key].append(other)
+        # keep only top 2 variants per key
+        for k in expansion_dict:
+            expansion_dict[k] = expansion_dict[k][:2]
+        column_expansions[col] = expansion_dict
+
+    return column_expansions
+
+
+def find_expansions(val: str, expansion_dict: Dict[str, List[str]], threshold: float = 0.8) -> List[str]:
+    out = []
+    val_lower = val.lower()
+    for k, variants in expansion_dict.items():
+        if _string_similarity(val_lower, k) >= threshold:
+            out.extend(variants)
+    return out
+
+
+def expand_value_learned(val: str, expansion_dict: Dict[str, List[str]], threshold: float = 0.8) -> str:
+    if not val:
+        return val
+    variants = find_expansions(val, expansion_dict, threshold)
+    all_vals = [val] + variants
+    seen = []
+    for x in all_vals:
+        if x not in seen:
+            seen.append(x)
+    return "; ".join(seen[:3])
