@@ -23,6 +23,7 @@ Usage examples
 import argparse, csv, logging, os, sys
 from pathlib import Path
 from typing import Optional
+import json
 
 
 def build_parser():
@@ -35,8 +36,8 @@ def build_parser():
     p.add_argument("--legacy",      action="store_true", help="Use old plain-text pipeline")
     p.add_argument("--api-key",     default=None)
     p.add_argument("--base-url",    default=None)
-    p.add_argument("--model",       default="gpt-4o")
-    p.add_argument("--max-tokens",  type=int, default=2048)
+    p.add_argument("--model",       default="gpt-4o-mini")
+    p.add_argument("--max-tokens",  type=int, default=8192)
     p.add_argument("--no-dedup",    action="store_true")
     p.add_argument("--verbose", "-v", action="store_true")
     return p
@@ -65,6 +66,13 @@ def process_one(input_path, output_path, rules_only, api_key, base_url, model, m
         doc = filler.fill(paper, initial)
         n_after = sum(1 for v in doc.rows[0].model_dump().values() if v != NA)
         logging.info("After LLM: %d/%d fields filled (+%d)", n_after, len(row0), n_after - n_filled)
+
+        # --- Save raw LLM output JSON per file ---
+        raw_llm_json = doc.model_dump()  # or whatever gives you the full LLM output
+        raw_json_path = output_path.with_suffix(".llm.json")
+        with open(raw_json_path, "w", encoding="utf-8") as f:
+            json.dump(raw_llm_json, f, indent=2, ensure_ascii=False)
+        logging.info("Written raw LLM JSON -> %s", raw_json_path)        
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", newline="", encoding="utf-8") as f:

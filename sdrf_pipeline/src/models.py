@@ -174,7 +174,7 @@ class SDRFRow(BaseModel):
     separation: str = Field(default="not applicable",
                             description="Any on-line method used to separate the samples into fractions right before MS.")
 
-    # --- Factor Values ---
+    """
     fv_bait: str = Field(default="not applicable",
                       description="Experimental factor: The protein or molecule used as bait in an affinity‐purification experiment.")
     fv_cell_part: str =  Field(default="not applicable",
@@ -199,7 +199,11 @@ class SDRFRow(BaseModel):
                              )
     fv_treatment: str = Field(default="not applicable",
                            description="Experimental treatment.", examples="drug X 5 µM 24h")
-
+                           """
+    factors: list[str] = Field(
+        default_factory=list,
+        description="Names of experimental variables that are compared in this study (e.g. treatment, time, dose)."
+    )
     usage: str = Field(default="raw",
                        description="", examples="")
 

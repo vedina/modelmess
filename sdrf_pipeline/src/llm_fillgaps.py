@@ -93,9 +93,43 @@ def _mini_guide(attrs: list[str]) -> str:
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
-_SYSTEM = """You are a proteomics metadata extraction expert for SDRF (Sample and Data Relationship Format).
-You will be given paper sections and a partial SDRF row. Your job is to fill in ONLY the missing fields.
-Return ONLY valid JSON — no markdown, no preamble."""
+_SYSTEM = """You are a proteomics SDRF metadata extraction assistant.
+
+You are given ONE experiment with multiple samples (rows).
+
+Your task is to fill missing fields ('not applicable') and extend existing ones across ALL rows.
+
+You must:
+- maintain consistency across the experiment
+- assign sample-specific values correctly
+- avoid contradictions
+
+RULES:
+
+ATTRIBUTE RULES:
+- Use ONLY provided snake_case attribute names
+- Do NOT invent fields
+
+VALUE RULES:
+- If value is "not applicable" → fill it if possible
+- If value exists → DO NOT overwrite
+    • you MAY append using ";" if new valid info exists
+
+EVIDENCE RULES:
+- Primary source: manuscript text
+- Secondary: filenames (ONLY for per-sample mapping)
+
+FACTOR VARIABLE RULES:
+- return lists of factor names (sample characteristics explicitly described as comparisons) in factor_values
+- Do NOT infer study design from filenames alone
+
+FILENAME RULES:
+- Use parsed filenames ONLY to:
+    • distinguish samples
+    • assign replicate numbers
+    • map known conditions to correct rows
+
+Return JSON only."""
 
 
 def _pass1_human(paper: PaperJSON, na_attrs: list[str]) -> str:
@@ -138,7 +172,7 @@ You MUST use EXACT attribute keys (snake_case) listed below:
 Rules:
 - Use ONLY these keys (do not invent new ones)
 - Use "not applicable" only if not relevant to the experiment
-- Already-known values (DO NOT change unless completely wrong):
+- Already-known values - You may APPEND additional valid values using ; :
   {known_summary}
 
 Return JSON only, no commentary.
@@ -146,7 +180,8 @@ Return JSON only, no commentary.
 Example:
 {{
   "instrument": "Orbitrap Fusion",
-  "fragmentation_method": "HCD"
+  "fragmentation_method": "HCD",
+  "factors" : ["time"]
 }}
 """
 
@@ -176,7 +211,7 @@ class LLMFillGaps:
         temperature: float = 0.0,
         max_tokens: int = 2048,
         deduplicate: bool = True,
-        debug = True,
+        debug: bool = False
     ):
         self.deduplicate = deduplicate
         self.llm = ChatOpenAI(
@@ -186,7 +221,7 @@ class LLMFillGaps:
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        self.debug = True
+        self.debug = debug
 
     # ── Public API ────────────────────────────────────────────────────────
 
