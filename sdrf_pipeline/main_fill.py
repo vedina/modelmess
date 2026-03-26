@@ -33,7 +33,6 @@ def build_parser():
     p.add_argument("--output",      default=None)
     p.add_argument("--output-dir",  default="output")
     p.add_argument("--rules-only",  action="store_true", help="Skip LLM stage")
-    p.add_argument("--legacy",      action="store_true", help="Use old plain-text pipeline")
     p.add_argument("--api-key",     default=None)
     p.add_argument("--base-url",    default=None)
     p.add_argument("--model",       default="gpt-4o-mini")
@@ -92,14 +91,6 @@ def main():
         format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S",
     )
     api_key = args.api_key or os.environ.get("OPENAI_API_KEY", "")
-
-    if args.legacy:
-        from src.pipeline import SDRFPipeline
-        pl = SDRFPipeline(api_key=api_key, model=args.model,
-                          base_url=args.base_url, max_tokens=args.max_tokens)
-        inp = Path(args.input)
-        pl.process_batch(inp, args.output_dir) if args.batch else pl.process_file(inp, args.output)
-        return
 
     inp = Path(args.input)
     dedup = not args.no_dedup
