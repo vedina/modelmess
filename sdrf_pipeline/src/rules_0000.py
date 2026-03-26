@@ -560,7 +560,7 @@ def rule_number_of_samples(raw_files: list[str], channels: int) -> str:
     return str(len(raw_files) * channels)
 
 
-def rule_biological_replicate_from_filename(filename: str) -> str:
+def rule_biological_replicate_from_filename_0(filename: str) -> str:
     """
     Try to extract replicate number from filename conventions:
     _R1_, _rep1_, -1-, _01., etc.
@@ -575,6 +575,33 @@ def rule_biological_replicate_from_filename(filename: str) -> str:
     if m:
         return m.group(1)
     return "not applicable"
+
+
+def rule_biological_replicate_from_filename(filename: str) -> str:
+    """
+    Extracts the biological replicate by looking for the trailing number.
+    It ignores numbers followed by 'C' (Celsius), 'min' (minutes), or 'h' (hours).
+    """
+    stem = Path(filename).stem
+    
+    # 1. First, strip common experimental suffixes that trick the extractor
+    # This removes things like _80C, _30min, _10h
+    clean_stem = re.sub(r'[_\-]?\d+(?:C|min|h|ug|ml|nM|mM)', '', stem, flags=re.IGNORECASE)
+    
+    # 2. Now look for the LAST number in the remaining string
+    # We look for a number that is either at the end or preceded by a separator
+    match = re.search(r'(?:[_\-]|(?<=[a-zA-Z]))(\d+)$', clean_stem)
+    
+    if match:
+        return match.group(1)
+    
+    # 3. Fallback: if no trailing number, look for any standalone number 
+    # that isn't attached to a unit
+    numbers = re.findall(r'(?<![a-zA-Z0-9])(\d+)(?![a-zA-Z0-9])', clean_stem)
+    if numbers:
+        return numbers[-1] # Assume the last one is the replicate
+        
+    return "1" # Default to 1
 
 
 def rule_channel_label(label_base: str, channel_idx: int, total_channels: int) -> str:
@@ -622,10 +649,32 @@ def _group_files_by_biorep(raw_files: list[str]) -> dict[str, list[str]]:
     return groups
 
 
-def rule_is_fractionated(filenames: list[str]) -> bool:
+def rule_is_fractionated_simple(filenames: list[str]) -> bool:
     """Check if the file list contains common fractionation patterns."""
     frac_pattern = re.compile(r'[_\-](?:F|frac|part|fraction|slice)[\s\-]?\d+', re.IGNORECASE)
     return any(frac_pattern.search(f) for f in filenames)
+
+
+def rule_is_fractionated(filenames: list[str]) -> bool:
+    """
+    Check if the file list contains common fractionation patterns.
+    Looks for markers like _F01, -frac2, _part3, _slice4, etc., 
+    usually followed by a number and positioned near the end of the stem.
+    """
+    # Pattern looks for separator + (keyword) + number
+    # We use a non-greedy approach followed by optional extensions
+    frac_regex = re.compile(
+        r'[_\-](?:F|frac|fraction|part|slice|section)[\s\-]?\d+(?:[_\-]|(?=\.))', 
+        re.IGNORECASE
+    )
+    
+    # We only count it as fractionated if multiple files in the set
+    # follow the same naming convention but with different numbers.
+    found_markers = [f for f in filenames if frac_regex.search(f)]
+    
+    # Logic: if 0 or 1 file has the marker, it might just be a weird name.
+    # If 2+ files have it, it's a structural fractionation pattern.
+    return len(found_markers) > 1
 
 
 def get_sample_root(filename: str) -> str:
@@ -722,6 +771,22 @@ def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
         files.sort()
         num_fracs_in_group = len(files)
         
+        # Check if this group is actually fractionated
+        is_frac = rule_is_fractionated(files)
+        #is_frac_group = any(re.search(r'[_\-](?:F|frac|part|fraction|slice)[\s\-]?\d+', f, re.I) for f in files)
+        
+        # Determine Technical Replicates
+        # If it's NOT fractionated but has multiple files, they are tech reps
+        if not is_frac and num_fracs_in_group > 1:
+            tech_reps = str(num_fracs_in_group)
+            num_fracs = "1"
+        elif is_frac:
+            tech_reps = "1"
+            num_fracs = str(num_fracs_in_group)
+        else:
+            tech_reps = "1"
+            num_fracs = "1"
+
         # We pick the first file as the representative for metadata extraction
         rep_file = files[0]
         bio_rep = rule_biological_replicate_from_filename(rep_file)
@@ -757,7 +822,7 @@ def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
                 modification_5=mods[5],
                 modification_6=mods[6],
                 number_of_samples=n_samples,
-                number_of_technical_replicates="1",
+                number_of_technical_replicates=tech_reps,
                 organism=organism,
                 organism_part=organism_part,
                 reduction_reagent=reduction,
@@ -767,14 +832,15 @@ def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
                 acquisition_method=acquisition,
                 flow_rate_chromatogram=flow_rate,
                 # If grouped, identifier is '1' for the merged row
-                fraction_identifier="1", 
+                fraction_identifier="1",   # '1' is correct for a collapsed row
                 fractionation_method=frac_method,
                 fragmentation_method=fragmentation,
                 gradient_time=gradient,
                 instrument=instrument,
                 ionization_type="ESI",
                 ms2_mass_analyzer=ms2_analyzer,
-                number_of_fractions=str(num_fracs_in_group),
+                #number_of_fractions=str(num_fracs_in_group),
+                number_of_fractions=num_fracs,                
                 number_of_missed_cleavages=missed_cleav,
                 precursor_mass_tolerance=precursor_tol,
                 separation=separation,
