@@ -577,7 +577,7 @@ def rule_biological_replicate_from_filename_0(filename: str) -> str:
     return "not applicable"
 
 
-def rule_biological_replicate_from_filename(filename: str) -> str:
+def rule_biological_replicate_from_filename_1(filename: str) -> str:
     """
     Extracts the biological replicate by looking for the trailing number.
     It ignores numbers followed by 'C' (Celsius), 'min' (minutes), or 'h' (hours).
@@ -602,6 +602,135 @@ def rule_biological_replicate_from_filename(filename: str) -> str:
         return numbers[-1] # Assume the last one is the replicate
         
     return "1" # Default to 1
+
+
+def rule_biological_replicate_from_filename_2(filename: str, all_filenames: list[str]) -> str:
+    stem = Path(filename).stem
+    
+    # 1. Strip known units (C, min, h, ug, etc.)
+    clean_stem = re.sub(r'[_\-]?\d+(?:C|min|h|ug|ml|nM|mM)', '', stem, flags=re.IGNORECASE)
+    
+    # 2. Find all candidate numbers in the name
+    # We look for numbers that aren't part of a larger alphanumeric word
+    candidates = re.findall(r'(?<![a-zA-Z0-9])(\d+)(?![a-zA-Z0-9])', clean_stem)
+    
+    # 3. Filter candidates based on 'Human Scale' sanity
+    valid_replicates = []
+    for num_str in candidates:
+        val = int(num_str)
+        # SANITY CHECKS:
+        # - Ignore numbers > 100 (Catalog IDs / Timestamps)
+        # - Ignore numbers that look like years (2021, 2022)
+        # - Ignore numbers longer than 4 digits
+        if 1 <= val <= 100 and len(num_str) <= 2:
+            valid_replicates.append(num_str)
+            
+    if valid_replicates:
+        # Usually, the replicate is the LAST valid small number in the name
+        # e.g., JM_..._DMSO_11.raw -> '1' (from the 11) or '2'
+        # In JM_..._11, the first 1 is the bio-rep, the second 1 is the tech-rep
+        # Let's take the last digit of the last valid number
+        final_candidate = valid_replicates[-1]
+        return final_candidate[-1] # Extracts '1' from '11' or '2' from '22'
+        
+    return "1"
+
+
+def rule_biological_replicate_from_filename_3(filename: str, all_filenames: list[str]) -> str:
+    """
+    Identifies the replicate by finding the number that varies across the dataset
+    while ignoring 'stable' numbers like project IDs or catalog numbers.
+    """
+    import re
+    from collections import Counter
+    
+    stem = Path(filename).stem
+    
+    # 1. Extract all number sequences from EVERY filename in the set
+    all_numbers_across_files = []
+    for f in all_filenames:
+        all_numbers_across_files.append(re.findall(r'\d+', Path(f).stem))
+    
+    # 2. Count how often each number appears across the whole dataset
+    # If a number like '11814460001' or '2020' appears in every single file, it's NOT a replicate.
+    number_freq = Counter([num for sublist in all_numbers_across_files for num in sublist])
+    total_files = len(all_filenames)
+
+    # 3. Find numbers in our specific current filename
+    current_numbers = re.findall(r'\d+', stem)
+    
+    if not current_numbers:
+        return "1"
+
+    # 4. Filter candidates: We want numbers that are NOT in every file
+    # But we also want to avoid huge numbers (Catalog IDs)
+    candidates = []
+    for num_str in current_numbers:
+        freq = number_freq[num_str]
+        val = int(num_str)
+        
+        # Logic: 
+        # - If freq == total_files, it's a project/date ID (Stable)
+        # - If freq == 1 (and there are many files), it's a unique ID or a Replicate
+        # - If the number is huge (> 1,000,000), it's likely a catalog/timestamp
+        if freq < total_files and val < 1000000:
+            candidates.append(num_str)
+
+    # 5. Final Selection
+    if candidates:
+        # Usually, the replicate is the LAST variable number
+        return candidates[-1]
+    
+    # 6. Fallback for the '2907.raw' case (where the number is the name)
+    if len(current_numbers) == 1 and len(all_filenames) > 1:
+        return current_numbers[0]
+
+    return "1"
+
+
+def rule_biological_replicate_from_filename(filename: str, all_filenames: list[str]) -> str:
+    import re
+    from collections import Counter
+    stem = Path(filename).stem
+    
+    # 1. STRIP NOISE: Remove units (80C, 30min) and mutation-like strings (F198S)
+    # This regex removes numbers touching letters (like F198S) and units (30min)
+    clean_stem = re.sub(r'\b[a-zA-Z]+\d+[a-zA-Z]*\b', '', stem) # Removes F198S, Q160X
+    clean_stem = re.sub(r'\d+(?:C|min|h|sec|ug|ml|nM|mM)', '', clean_stem, flags=re.IGNORECASE) # Removes 30min, 80C
+    
+    # 2. DATASET CONTEXT: Find what actually varies
+    all_numbers_across_files = []
+    for f in all_filenames:
+        # Only extract "standalone" numbers
+        all_numbers_across_files.append(re.findall(r'(?<![a-zA-Z0-9])(\d+)(?![a-zA-Z0-9])', Path(f).stem))
+    
+    number_freq = Counter([num for sublist in all_numbers_across_files for num in sublist])
+    total_files = len(all_filenames)
+
+    # 3. EXTRACT CANDIDATES from current file
+    # We look for standalone numbers only
+    current_numbers = re.findall(r'(?<![a-zA-Z0-9])(\d+)(?![a-zA-Z0-9])', clean_stem)
+    
+    candidates = []
+    for num_str in current_numbers:
+        freq = number_freq[num_str]
+        val = int(num_str)
+        
+        # SANITY CHECKS:
+        # - freq < total_files: Must change across files
+        # - val < 500: Replicates are rarely in the thousands (unless it's the 2907.raw case)
+        # - len <= 3: Replicates are short
+        if freq < total_files and val < 500 and len(num_str) <= 3:
+            candidates.append(num_str)
+
+    # 4. SELECTION LOGIC
+    if candidates:
+        # In 'LX055-80-3-milk...', after stripping 80C and 30min, 
+        # the remaining numbers might be 055, 80, 3.
+        # Usually, the 'Biological Replicate' is the one closest to the end.
+        return candidates[-1]
+    
+    return "1"
 
 
 def rule_channel_label(label_base: str, channel_idx: int, total_channels: int) -> str:
@@ -789,7 +918,7 @@ def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
 
         # We pick the first file as the representative for metadata extraction
         rep_file = files[0]
-        bio_rep = rule_biological_replicate_from_filename(rep_file)
+        bio_rep = rule_biological_replicate_from_filename(rep_file, primary_files)
 
         for ch_idx in range(channels):
             if channels > 1:
