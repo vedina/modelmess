@@ -29,6 +29,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from collections import defaultdict
 
 from src.models import SDRFDocument, SDRFRow
 
@@ -57,7 +58,8 @@ class PaperJSON:
         abstract = data.get("ABSTRACT", "")
         methods  = data.get("METHODS", "")
         raw_files = data.get("Raw Data Files", [])
-
+        # Retain unique values, preserve original order
+        raw_files = list(dict.fromkeys(raw_files))
         # Try to find PXD id anywhere in the JSON values
         full_text = json.dumps(data)
         pxd_match = re.search(r'PXD\d{6}', full_text)
@@ -608,6 +610,18 @@ def rule_channel_label(label_base: str, channel_idx: int, total_channels: int) -
     return f"{prefix}-{tag}"
 
 
+def _group_files_by_biorep(raw_files: list[str]) -> dict[str, list[str]]:
+    """
+    Group files by biological replicate inferred from filename.
+    Returns dict: replicate_id -> list of files
+    """
+    groups = defaultdict(list)
+    for f in raw_files:
+        bio = rule_biological_replicate_from_filename(f)
+        groups[bio].append(f)
+    return groups
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 3.  Main extraction function
 # ══════════════════════════════════════════════════════════════════════════════
@@ -650,6 +664,7 @@ def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
     # ── Per-file rows ─────────────────────────────────────────────────────────
     rows: list[SDRFRow] = []
     total_files = len(paper.raw_files)
+    
 
     for file_idx, filename in enumerate(paper.raw_files):
         bio_rep = rule_biological_replicate_from_filename(filename)
