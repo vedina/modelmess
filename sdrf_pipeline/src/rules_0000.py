@@ -622,68 +622,105 @@ def _group_files_by_biorep(raw_files: list[str]) -> dict[str, list[str]]:
     return groups
 
 
+def rule_is_fractionated(filenames: list[str]) -> bool:
+    """Check if the file list contains common fractionation patterns."""
+    frac_pattern = re.compile(r'[_\-](?:F|frac|part|fraction|slice)[\s\-]?\d+', re.IGNORECASE)
+    return any(frac_pattern.search(f) for f in filenames)
+
+
+def get_sample_root(filename: str) -> str:
+    """
+    Removes fraction/part suffixes to find the base sample identity.
+    Example: 'SampleA_F01.raw' -> 'SampleA'
+    """
+    stem = Path(filename).stem
+    # Removes trailing _F01, _part1, -frac2, etc.
+    root = re.sub(r'[_\-](?:F|frac|part|fraction|slice)[\s\-]?\d+$', '', stem, flags=re.IGNORECASE)
+    return root
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 3.  Main extraction function
 # ══════════════════════════════════════════════════════════════════════════════
 
 def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
     """
-    Apply all rules to the paper and return an SDRFDocument.
-    One SDRFRow is produced per (file × channel).
+    Apply all rules. Groups files by 'root' name to handle fractionation generically.
+    One SDRFRow is produced per (Sample Group × channel).
     """
     text = paper.searchable
-
-    # ── Shared fields (same for every row) ───────────────────────────────────
-    organism       = rule_organism(text)
-    organism_part  = rule_organism_part(text)
-    disease        = rule_disease(text)
-    cleavage       = rule_cleavage_agent(text)
-    mods           = rule_modifications(text)
-    instrument     = rule_instrument(text)
-    fragmentation  = rule_fragmentation(text)
-    acquisition    = rule_acquisition_method(text)
-    separation     = rule_separation(text)
-    precursor_tol  = rule_precursor_tolerance(text)
-    missed_cleav   = rule_missed_cleavages(text)
-    reduction      = rule_reduction_reagent(text)
-    alkylation     = rule_alkylation_reagent(text)
-    material       = rule_material_type(text)
-    specimen       = rule_specimen(text)
-    cell_line      = rule_cell_line(text)
-    sex            = rule_sex(text)
-    flow_rate      = rule_flow_rate(text)
-    gradient       = rule_gradient_time(text)
-    ms2_analyzer   = rule_ms2_analyzer(text)
-    label_base, channels = rule_label_and_channels(text, raw_files=paper.raw_files)
-    n_samples      = rule_number_of_samples(paper.raw_files, channels)
-
-    frac_result    = rule_fractionation(text)
-    frac_method    = frac_result[0] if frac_result else "not applicable"
-    n_fractions    = str(frac_result[1]) if frac_result else "1"
-
-    # ── Per-file rows ─────────────────────────────────────────────────────────
-    rows: list[SDRFRow] = []
-    total_files = len(paper.raw_files)
     
+    # ── 1. Filter Logic: DIA vs DDA ──
+    # If both are present, DIA are usually the samples, DDA are the library fractions.
+    all_files = paper.raw_files
+    dia_files = [f for f in all_files if "DIA" in f.upper()]
+    dda_files = [f for f in all_files if "DDA" in f.upper()]
+    
+    primary_files = dia_files if (dia_files and dda_files) else all_files
 
-    for file_idx, filename in enumerate(paper.raw_files):
-        bio_rep = rule_biological_replicate_from_filename(filename)
+    # ── 2. Grouping Logic (Collapse Fractions) ──
+    sample_groups = defaultdict(list)
+    for f in primary_files:
+        root = get_sample_root(f)
+        sample_groups[root].append(f)
+    
+    # ── 3. Shared Field Extraction ──
+    organism = rule_organism(text)
+    organism_part = rule_organism_part(text)
+    disease = rule_disease(text)
+    cleavage = rule_cleavage_agent(text)
+    mods = rule_modifications(text)
+    instrument = rule_instrument(text)
+    fragmentation = rule_fragmentation(text)
+    acquisition = rule_acquisition_method(text)
+    separation = rule_separation(text)
+    precursor_tol = rule_precursor_tolerance(text)
+    missed_cleav = rule_missed_cleavages(text)
+    reduction = rule_reduction_reagent(text)
+    alkylation = rule_alkylation_reagent(text)
+    material = rule_material_type(text)
+    specimen = rule_specimen(text)
+    cell_line = rule_cell_line(text)
+    sex = rule_sex(text)
+    flow_rate = rule_flow_rate(text)
+    gradient = rule_gradient_time(text)
+    ms2_analyzer = rule_ms2_analyzer(text)
+    
+    label_base, channels = rule_label_and_channels(text, raw_files=primary_files)
+    
+    # Total samples is (Unique Groups * channels)
+    n_samples = str(len(sample_groups) * channels)
+
+    frac_result = rule_fractionation(text)
+    frac_method = frac_result[0] if frac_result else "not applicable"
+
+    # ── 4. Per-Group Row Generation ──
+    rows: list[SDRFRow] = []
+    
+    for group_idx, (root_name, files) in enumerate(sample_groups.items()):
+        # Sort files to ensure F01, F02 order
+        files.sort()
+        num_fracs_in_group = len(files)
+        
+        # We pick the first file as the representative for metadata extraction
+        rep_file = files[0]
+        bio_rep = rule_biological_replicate_from_filename(rep_file)
 
         for ch_idx in range(channels):
-            # channel-specific label (e.g. TMT10-126)
             if channels > 1:
                 ch_label = rule_channel_label(label_base, ch_idx, channels)
+                assay = f"{root_name}_ch{ch_idx + 1}"
             else:
                 ch_label = label_base
+                assay = root_name
 
             row = SDRFRow(
-                # ── prefix ──
-                sample_source=f"source {file_idx * channels + ch_idx + 1}",
-                assay_name=f"{filename}_ch{ch_idx + 1}" if channels > 1 else filename,
-                raw_data_file=filename,
+                sample_source=f"source {group_idx * channels + ch_idx + 1}",
+                assay_name=assay,
+                # For fractionated samples, standard SDRF often joins files with ';' 
+                # or lists the representative. Here we provide the representative.
+                raw_data_file=";".join(files) if num_fracs_in_group > 1 else rep_file,
                 PXD=paper.pxd,
 
-                # ── sample characteristics ──
                 alkylation_reagent=alkylation,
                 biological_replicate=bio_rep,
                 cell_line=cell_line,
@@ -706,17 +743,17 @@ def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
                 sex=sex,
                 specimen=specimen,
 
-                # ── comments ──
                 acquisition_method=acquisition,
                 flow_rate_chromatogram=flow_rate,
-                fraction_identifier="1",
+                # If grouped, identifier is '1' for the merged row
+                fraction_identifier="1", 
                 fractionation_method=frac_method,
                 fragmentation_method=fragmentation,
                 gradient_time=gradient,
                 instrument=instrument,
-                ionization_type="ESI",        # safe default for all LC-MS
+                ionization_type="ESI",
                 ms2_mass_analyzer=ms2_analyzer,
-                number_of_fractions=n_fractions,
+                number_of_fractions=str(num_fracs_in_group),
                 number_of_missed_cleavages=missed_cleav,
                 precursor_mass_tolerance=precursor_tol,
                 separation=separation,
@@ -724,10 +761,9 @@ def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
             rows.append(row)
 
     notes = (
-        f"Rule-based extraction from {total_files} file(s), "
-        f"{channels} channel(s) each → {len(rows)} rows total. "
-        f"PXD: {paper.pxd}. "
-        f"Fields left as 'not applicable' require LLM fill-in."
+        f"Grouped {len(primary_files)} files into {len(sample_groups)} sample(s). "
+        f"Detected {channels} channel(s) per sample. "
+        f"PXD: {paper.pxd}."
     )
 
     return SDRFDocument(rows=rows, extraction_notes=notes)
