@@ -10,8 +10,8 @@ class SDRFRow(BaseModel):
     """- One SDRF row represents one sample–data file relationship."""
 
     # --- Row prefix ---
-    sample_source: str = Field(default="sample source", description="Unique ID for the starting material (e.g. organism)")
-    assay_name: str = Field(default="run 1", description="Unique ID for the assay (sample + file)")
+    sample_source: str = Field(default="Sample 1", description="Unique ID for the starting material (e.g. organism). Use stable ID for the biological starting material context.")
+    assay_name: str = Field(default="run 1", description="Unique ID for the assay (sample + file). Must be unique per raw file (recommend deterministic: <source_name>_<suffix derived from fraction/techrep/label>)")
     raw_data_file: str = Field(description="File name or path of the raw spectrum file")
 
     # --- Sample Characteristics ---
