@@ -33,16 +33,16 @@ from src.fields import (
 logger = logging.getLogger(__name__)
 
 # ── SDRF column order ─────────────────────────────────────────────────────────
-SDRF_HEADERS = ["D", "PXD", "Raw Data File"] + [f.header for f in FIELDS]
-HEADER_TO_ATTR = {"D": "D", "PXD": "PXD", "Raw Data File": "raw_data_file"}
+SDRF_HEADERS = ["ID", "Sample Source", "Raw Data File"] + [f.header for f in FIELDS]
+HEADER_TO_ATTR = {"ID": "ID", "Sample Source": "sample_source", "Raw Data File": "raw_data_file"}
 HEADER_TO_ATTR.update({f.header: f.attr for f in FIELDS})
 
 # ── Compact JSON schema (sent once, attr names only) ──────────────────────────
 def _build_compact_schema() -> str:
     """~800 chars instead of ~3 kB annotated version."""
-    attrs = ["D", "PXD", "raw_data_file"] + [f.attr for f in FIELDS]
+    attrs = ["ID", "Sample Source", "raw_data_file"] + [f.attr for f in FIELDS]
     placeholder = {a: "..." for a in attrs}
-    placeholder["D"] = "S"
+    placeholder["ID"] = "S"
     placeholder["usage"] = "raw"
     return (
         '{"rows": [' + json.dumps(placeholder) + ', ...], '

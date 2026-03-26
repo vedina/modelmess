@@ -128,21 +128,27 @@ Skip fields with no evidence. Do NOT output JSON yet.
 
 def _pass2_human(na_attrs: list[str], known_summary: str) -> str:
     """Ask LLM to convert its inventory into a JSON patch for the N/A fields."""
-    field_names = ", ".join(
-        FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a
-        for a in na_attrs
-    )
-    return f"""Based on your findings above, output a JSON object with ONLY these fields:
-{field_names}
+    attr_list = "\n".join(f"- {a}" for a in na_attrs)
+    return f"""Based on your findings above, output a JSON object.
+
+You MUST use EXACT attribute keys (snake_case) listed below:
+
+{attr_list}
 
 Rules:
-- Use "not applicable" only if truly absent from the paper.
-- Already-known values for this sample (DO NOT change these):
+- Use ONLY these keys (do not invent new ones)
+- Use "not applicable" only if not relevant to the experiment
+- Already-known values (DO NOT change unless completely wrong):
   {known_summary}
-- Return a flat JSON object with the attribute names as keys (not SDRF headers).
-- Example attribute names: cleavage_agent, instrument, fragmentation_method …
 
-JSON only, no commentary."""
+Return JSON only, no commentary.
+
+Example:
+{{
+  "instrument": "Orbitrap Fusion",
+  "fragmentation_method": "HCD"
+}}
+"""
 
 
 # ── Main class ────────────────────────────────────────────────────────────────
@@ -170,6 +176,7 @@ class LLMFillGaps:
         temperature: float = 0.0,
         max_tokens: int = 2048,
         deduplicate: bool = True,
+        debug = True,
     ):
         self.deduplicate = deduplicate
         self.llm = ChatOpenAI(
@@ -179,6 +186,7 @@ class LLMFillGaps:
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        self.debug = True
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -281,6 +289,8 @@ class LLMFillGaps:
             HumanMessage(content=_pass2_human(na_attrs, known)),
         ]
         raw = self._call_llm(messages)
+        if self.debug:
+            print("RAW LLM OUTPUT:\n", raw)
         return self._parse_patch(raw, na_attrs)
 
     def _call_llm(self, messages: list) -> str:
