@@ -106,50 +106,132 @@ def _find_all(pattern: str, text: str, flags: int = re.IGNORECASE) -> list[str]:
 
 # ── Label / quantification ────────────────────────────────────────────────────
 
-# Known isobaric labels and their channel counts
-_TMT_CHANNELS = {
-    "TMT16":  16, "TMTpro16": 16, "TMT16plex": 16,
-    "TMT11":  11, "TMT11plex": 11,
-    "TMT10":  10, "TMT10plex": 10,
-    "TMT6":    6, "TMT6plex": 6,
-    "TMT2":    2, "TMT2plex": 2,
-    "TMT":     6,  # generic fallback
-    "iTRAQ8":  8, "iTRAQ8plex": 8,
-    "iTRAQ4":  4, "iTRAQ4plex": 4,
-    "iTRAQ":   4,  # generic fallback
-}
-
-def rule_label_and_channels(text: str) -> tuple[str, int]:
+def rule_label_and_channels(text: str, raw_files: list | None = None) -> tuple[str, int]:
     """
-    Returns (label_name, channels_per_file).
-    label_name: SDRF-style value, e.g. "TMT10", "label free sample"
-    channels:   1 for LFQ/SILAC, N for isobaric
-    """
-    # Isobaric labels (check most specific first)
-    for tag in sorted(_TMT_CHANNELS, key=len, reverse=True):
-        if re.search(rf'\b{re.escape(tag)}\b', text, re.IGNORECASE):
-            # Try to extract explicit plex number near the tag
-            plex_m = re.search(
-                rf'\b{re.escape(tag)}[\s-]?(\d+)[\s-]?plex\b', text, re.IGNORECASE
-            )
-            if plex_m:
-                n = int(plex_m.group(1))
-                label = f"TMT{n}" if "TMT" in tag.upper() else f"iTRAQ{n}"
-                return label, n
-            n = _TMT_CHANNELS[tag]
-            return tag, n
+    Detect isobaric label type and channel count from paper text and/or filenames.
 
-    # SILAC
+    Priority order:
+      1. Filenames  — TMT16/TMTpro16 in raw file names is a hard signal
+      2. Explicit 'Xplex' number in text  — e.g. "TMTpro 16plex", "TMT 10plex"
+      3. Implicit number without 'plex'   — e.g. "TMT 16", "TMT-16"
+      4. Generic brand only               — e.g. "TMTpro" (16), "TMT" (6)
+      5. SILAC / dimethyl
+      6. Label-free (default)
+
+    Root cause of old bug: \bTMT16\b and \bTMTpro16\b both fail on
+    "TMTpro 16plex" because the space breaks the word-boundary match.
+    Fix: separate brand detection from plex-number extraction.
+    """
+    # ── 1. Filename signal (strongest) ───────────────────────────────────────
+    if raw_files:
+        fn_text = " ".join(raw_files)
+        m = re.search(r'TMT(?:pro)?[\s\-]?(\d+)', fn_text, re.IGNORECASE)
+        if m:
+            n = int(m.group(1))
+            return f"TMT{n}", n
+        m = re.search(r'iTRAQ[\s\-]?(\d+)', fn_text, re.IGNORECASE)
+        if m:
+            n = int(m.group(1))
+            return f"iTRAQ{n}", n
+
+    # ── 2. Explicit plex number in text ──────────────────────────────────────
+    # matches: "TMTpro 16plex", "TMT16plex", "TMT 10plex"
+    m = re.search(r'\bTMT(?:pro)?[\s\-]?(\d+)[\s\-]?plex\b', text, re.IGNORECASE)
+    if m:
+        n = int(m.group(1))
+        return f"TMT{n}", n
+
+    m = re.search(r'\biTRAQ[\s\-]?(\d+)[\s\-]?plex\b', text, re.IGNORECASE)
+    if m:
+        n = int(m.group(1))
+        return f"iTRAQ{n}", n
+
+    # ── 3. Number without 'plex' — "TMT 16", "TMTpro-16", "TMT16" ───────────
+    m = re.search(r'\bTMT(?:pro)?[\s\-]?(\d+)\b', text, re.IGNORECASE)
+    if m:
+        n = int(m.group(1))
+        return f"TMT{n}", n
+
+    m = re.search(r'\biTRAQ[\s\-]?(\d+)\b', text, re.IGNORECASE)
+    if m:
+        n = int(m.group(1))
+        return f"iTRAQ{n}", n
+
+    # ── 7. Multi-dataset papers: 'first dataset ... label-free ... second ... TMT' ──
+    # Split on ordinal dataset markers and check which block applies to these files.
+    blocks = re.split(
+        r'\b(?:first|second|third|1st|2nd|3rd)\s+dataset\b',
+        text, flags=re.IGNORECASE
+    )
+    if len(blocks) > 1:
+        # Default to first block (most papers: dataset 1 = the files we have)
+        target = blocks[1]
+        # Override if any filename appears verbatim in a different block
+        if raw_files:
+            for fn in raw_files[:3]:
+                for blk in blocks[1:]:
+                    if fn in blk:
+                        target = blk
+                        break
+        if re.search(r'\blabel.?free\b', target, re.IGNORECASE):
+            return "label free sample", 1
+        # Re-run steps 2-4 on the narrowed block
+        m = re.search(r'\bTMT(?:pro)?[\s\-]?(\d+)[\s\-]?plex\b', target, re.IGNORECASE)
+        if m:
+            n = int(m.group(1)); return f"TMT{n}", n
+        m = re.search(r'\bTMT(?:pro)?[\s\-]?(\d+)\b', target, re.IGNORECASE)
+        if m:
+            n = int(m.group(1)); return f"TMT{n}", n
+        if re.search(r'\bTMTpro\b', target, re.IGNORECASE): return "TMTpro16", 16
+        if re.search(r'\bTMT\b',    target, re.IGNORECASE): return "TMT6", 6
+
+    # ── 4. Generic brand only (no explicit channel count) ────────────────────
+    if re.search(r'\bTMTpro\b', text, re.IGNORECASE):
+        return "TMTpro16", 16   # TMTpro is always 16-plex
+    if re.search(r'\bTMT\b', text, re.IGNORECASE):
+        return "TMT6", 6        # plain TMT defaults to 6-plex
+    if re.search(r'\biTRAQ\b', text, re.IGNORECASE):
+        return "iTRAQ4", 4      # plain iTRAQ defaults to 4-plex
+
+    # ── 5. SILAC ──────────────────────────────────────────────────────────────
     if re.search(r'\bSILAC\b', text, re.IGNORECASE):
-        # Light/heavy = 2, light/medium/heavy = 3
-        if re.search(r'\b(light|medium|heavy)\b.*\b(medium|heavy)\b', text, re.IGNORECASE):
+        if re.search(r'light.*medium|medium.*heavy|triple[\s\-]?SILAC', text, re.IGNORECASE):
             return "SILAC", 3
         return "SILAC", 2
 
-    # Dimethyl
+    # ── 6. Dimethyl ───────────────────────────────────────────────────────────
     if re.search(r'\bdimethyl\s+label', text, re.IGNORECASE):
         return "dimethyl", 2
 
+    # ── 7. Multi-dataset papers: 'first dataset ... label-free ... second ... TMT' ──
+    # Split on ordinal dataset markers and check which block applies to these files.
+    blocks = re.split(
+        r'\b(?:first|second|third|1st|2nd|3rd)\s+dataset\b',
+        text, flags=re.IGNORECASE
+    )
+    if len(blocks) > 1:
+        # Default to first block (most papers: dataset 1 = the files we have)
+        target = blocks[1]
+        # Override if any filename appears verbatim in a different block
+        if raw_files:
+            for fn in raw_files[:3]:
+                for blk in blocks[1:]:
+                    if fn in blk:
+                        target = blk
+                        break
+        if re.search(r'\blabel.?free\b', target, re.IGNORECASE):
+            return "label free sample", 1
+        # Re-run steps 2-4 on the narrowed block
+        m = re.search(r'\bTMT(?:pro)?[\s\-]?(\d+)[\s\-]?plex\b', target, re.IGNORECASE)
+        if m:
+            n = int(m.group(1)); return f"TMT{n}", n
+        m = re.search(r'\bTMT(?:pro)?[\s\-]?(\d+)\b', target, re.IGNORECASE)
+        if m:
+            n = int(m.group(1)); return f"TMT{n}", n
+        if re.search(r'\bTMTpro\b', target, re.IGNORECASE): return "TMTpro16", 16
+        if re.search(r'\bTMT\b',    target, re.IGNORECASE): return "TMT6", 6
+
+    # ── 8. Default: label-free ────────────────────────────────────────────────
     return "label free sample", 1
 
 
@@ -666,34 +748,4 @@ if __name__ == "__main__":
     if doc.extraction_notes:
         print("Notes:", doc.extraction_notes)
 
-# Patch applied at end of file — override rule_label_and_channels with file-aware version
-# Dataset-order aware label detection
-_orig_rule_label = rule_label_and_channels
-
-def rule_label_and_channels(text: str, raw_files: list | None = None) -> tuple[str, int]:
-    """
-    When a paper describes multiple datasets ('first dataset... label-free...
-    second dataset... TMT'), split on ordinal keywords and check which block
-    the file list belongs to. Falls back to preferring label-free.
-    """
-    blocks = re.split(
-        r'\b(?:first|second|third|1st|2nd|3rd)\s+dataset\b',
-        text, flags=re.IGNORECASE
-    )
-    if len(blocks) > 1:
-        target = blocks[1]  # text after "first dataset" marker
-        if raw_files:
-            for fn in raw_files[:3]:
-                for blk in blocks[1:]:
-                    if fn in blk:
-                        target = blk
-                        break
-        if re.search(r'\blabel.free\b', target, re.IGNORECASE):
-            return "label free sample", 1
-        for tag in sorted(_TMT_CHANNELS, key=len, reverse=True):
-            if re.search(rf'\b{re.escape(tag)}\b', target, re.IGNORECASE):
-                return tag, _TMT_CHANNELS[tag]
-
-    if re.search(r'\blabel.free\b', text, re.IGNORECASE):
-        return "label free sample", 1
-    return _orig_rule_label(text)
+# (end of file — no patch needed, rule_label_and_channels is fully fixed above)
