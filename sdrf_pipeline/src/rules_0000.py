@@ -638,6 +638,26 @@ def get_sample_root(filename: str) -> str:
     root = re.sub(r'[_\-](?:F|frac|part|fraction|slice)[\s\-]?\d+$', '', stem, flags=re.IGNORECASE)
     return root
 
+
+def get_canonical_root(filename: str, all_filenames: list[str]) -> str:
+    """
+    Identifies if a file is a 'retry' or 'timestamped' version of another.
+    Example: 'data_1.raw' and 'data_1_20240101.raw' -> 'data_1'
+    """
+    stem = Path(filename).stem
+    
+    # Sort all stems by length (shortest first)
+    all_stems = sorted([Path(f).stem for f in all_filenames], key=len)
+    
+    for s in all_stems:
+        # If our current filename starts with a shorter existing filename 
+        # AND is followed by a common separator (like _ or -)
+        if stem.startswith(s) and stem != s:
+            if stem[len(s)] in ("_", "-", "."):
+                return s
+                
+    return stem
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 3.  Main extraction function
 # ══════════════════════════════════════════════════════════════════════════════
@@ -660,7 +680,8 @@ def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
     # ── 2. Grouping Logic (Collapse Fractions) ──
     sample_groups = defaultdict(list)
     for f in primary_files:
-        root = get_sample_root(f)
+        #root = get_sample_root(f)
+        root = get_canonical_root(f, primary_files)
         sample_groups[root].append(f)
     
     # ── 3. Shared Field Extraction ──
