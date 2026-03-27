@@ -91,7 +91,7 @@ _FRAGMENTATION_MAP = [
 ]
 
 
-_FRAGMENTATION_MAP = [
+_FRAGMENTATION_MAP_ = [
     # 1. HCD - Standard
     (r'\bhcd\b|higher.energy\s+collision',           'NT=HCD;AC=MS:1000422'),
     
@@ -108,8 +108,14 @@ _FRAGMENTATION_MAP = [
 ]
 
 _ACQUISITION_MAP = [
-    (r'data.dependent|dda', 'DDA'), 
-    (r'data.independent|dia|mse', 'DIA')
+    # 1. DDA: Keep it as the standard acronym or full term used in your peak run
+    (r'(?i)data.dependent|dda', 'DDA'), 
+    
+    # 2. DIA: DO NOT map to "higher-energy collision-induced dissociation"
+    (r'(?i)data.independent|dia', 'DIA'),
+    
+    # 3. MSE: Waters-specific DIA. Keep it literal as per your peak run
+    (r'(?i)mse', 'MSE')
 ]
 
 _SEPARATION_MAP = [
@@ -168,6 +174,19 @@ _IONIZATION_MAP = [
 ]
 
 _CLEAVAGE_MAP = [
+    (r'lys.?c.*trypsin|trypsin.*lys.?c',
+     'AC=MS:1001251;NT=Trypsin|AC=MS:1001309;NT=Lys-C'),
+    (r'\blys.?c\b',        'AC=MS:1001309;NT=Lys-C'),
+    (r'\btrypsin\b',       'AC=MS:1001251;NT=Trypsin'),
+    (r'\bchymotrypsin\b',  'AC=MS:1001306;NT=Chymotrypsin'),
+    (r'\bglu.?c\b',        'AC=MS:1001917;NT=Glu-C'),
+    (r'\basp.?n\b',        'AC=MS:1001305;NT=Asp-N'),
+    (r'\barg.?c\b',        'AC=MS:1001303;NT=Arg-C'),
+    (r'\bbnps.skatole\b',  'AC=MS:1001308;NT=CNBr'),
+    (r'\bcnbr\b',          'AC=MS:1001308;NT=CNBr'),
+]
+
+_CLEAVAGE_MAP_ = [
     # 1. Trypsin - Mapping to the most common generic accession
     (r'\btrypsin/p\b',                   'NT=Trypsin/P;AC=MS:1001313'),
     (r'\btrypsin\b',                     'NT=Trypsin;AC=MS:1001251'),
@@ -190,7 +209,19 @@ _CLEAVAGE_MAP = [
     (r'not\s*applicable|none|n/a',       'Not Applicable'),
 ]
 
-_LABEL_MAP = [
+_CLEAVAGE_MAP_ = [
+    # 1. Trypsin - Use the most common names found in high-scoring SDRFs
+    (r'\btrypsin/p\b',                   'Trypsin/P'), # No NT= prefix if you want raw match
+    (r'\btrypsin\b',                     'Trypsin'),
+    
+    # 2. Lys-C
+    (r'\blys[- ]?c\b',                   'Lys-C'),
+    
+    # 3. Baseline
+    (r'not\s*applicable|none|n/a',       'Not Applicable'),
+]
+
+_LABEL_MAP_ = [
     # 1. TMT with Plex AND Channel (Explicitly mapped to prevent TMTTMT corruption)
     # We use a non-capturing group (?:) for matching, but return a static string
     (r'tmt\s*16[-_ ]*(\d{3}[NC]?)', r'AC=PRIDE:0000543;NT=TMT16plex \1'),
@@ -215,9 +246,28 @@ _LABEL_MAP = [
 ]
 
 
+_LABEL_MAP = [
+    # 1. TMT Standard (Matches trail but returns CLEAN string)
+    (r'(?i)tmt\s*16[-_ ]*(?:\d{3}[NC]?)?', 'AC=PRIDE:0000543;NT=TMT16plex'),
+    (r'(?i)tmt\s*11[-_ ]*(?:\d{3}[NC]?)?', 'AC=MS:1002229;NT=TMT11plex'),
+    (r'(?i)tmt\s*10[-_ ]*(?:\d{3}[NC]?)?', 'AC=MS:1002228;NT=TMT10plex'),
+    (r'(?i)tmt\s*6[-_ ]*(?:\d{3}[NC]?)?',  'AC=PRIDE:0000456;NT=TMT6plex'),
+
+    # 2. iTRAQ (Matches trail but returns CLEAN string)
+    (r'(?i)itraq[-_ ]?(?:\d{3})?',        'AC=MS:1002624;NT=iTRAQ reagent'),
+    
+    # 3. SILAC & Label Free
+    (r'(?i)silac\s*heavy',                 'AC=PRIDE:0000615;NT=SILAC heavy'),
+    (r'(?i)silac\s*light',                 'AC=PRIDE:0000611;NT=SILAC light'),
+    (r'(?i)label.free|unlabeled|lfq',      'AC=MS:1002038;NT=label free sample'),
+    
+    # 4. TMT Fallback
+    (r'(?i)\btmt\b',                       'AC=PRIDE:0000451;NT=TMT')
+]
+
 _MS2_ANALYZER_MAP = [
     # 1. Orbitrap - The most frequent term in your training
-    (r'orbitrap', 'NT=Orbitrap;AC=MS:1000484'),
+    (r'orbitrap', 'NT=orbitrap;AC=MS:1000484'),
     
     # 2. Ion Trap - Note the capitalization from training
     (r'ion\s*trap', 'NT=ion trap;AC=MS:1000264'),
@@ -231,36 +281,34 @@ _MS2_ANALYZER_MAP = [
     # 5. Baseline
     (r'not\s*applicable|none', 'Not Applicable'),
 ]
-
-# Instrument: matched against LLM output, returns NT=...;AC=... string
 _INSTRUMENT_MAP = [
-    # 1. Q Exactive Family (Prioritize NT first)
-    (r'q.?exactive\s+hf[-_ ]?x',       'NT=Q Exactive HF-X;AC=MS:1002877'),
-    (r'q.?exactive\s+hf',            'NT=Q Exactive HF;AC=MS:1002523'),
-    (r'q.?exactive\s+plus',          'NT=Q Exactive Plus;AC=MS:1002634'),
-    (r'q.?exactive',                 'NT=Q Exactive;AC=MS:1001911'),
+    # 1. Q Exactive Family (Reverted to AC First + cleaned NT)
+    (r'q.?exactive\s+hf[-_ ]?x',       'AC=MS:1002877;NT=Q Exactive HF-X'),
+    (r'q.?exactive\s+hf',             'AC=MS:1002523;NT=Q Exactive HF'),
+    (r'q.?exactive\s+plus',           'AC=MS:1002634;NT=Q Exactive Plus'),
+    (r'q.?exactive',                 'AC=MS:1001911;NT=Q Exactive'),
     
-    # 2. Orbitrap Fusion Family
-    (r'fusion\s+lumos',              'NT=Orbitrap Fusion Lumos;AC=MS:1002732'),
-    (r'fusion',                      'NT=Orbitrap Fusion;AC=MS:1000639'),
+    # 2. Orbitrap Fusion Family (Using the 0.2535 specific AC: 1002416)
+    (r'fusion\s+lumos',               'AC=MS:1002732;NT=Orbitrap Fusion Lumos'),
+    (r'fusion',                       'AC=MS:1002416;NT=Orbitrap Fusion'), 
     
-    # 3. Exploris & Astral (Newer models)
-    (r'exploris\s+480',              'NT=Orbitrap Exploris 480;AC=MS:1003028'),
-    (r'astral',                      'NT=Orbitrap Astral'), # No AC in training, NT only is safe
+    # 3. Exploris & Astral (Matching the 0.2535 format)
+    (r'exploris\s+480',               'AC=MS:1003028;NT=Orbitrap Exploris 480'),
+    (r'astral',                       'AC=MS:1003378;NT=Orbitrap Astral'), # Added AC from your peak run
     
     # 4. LTQ Orbitrap Family
-    (r'ltq\s+orbitrap\s+elite',      'NT=LTQ Orbitrap Elite;AC=MS:1001910'),
-    (r'ltq\s+orbitrap\s+velos',      'NT=LTQ Orbitrap Velos;AC=MS:1001742'),
-    (r'ltq\s+orbitrap\s+xl',         'NT=LTQ Orbitrap XL;AC=MS:1000449'),
+    (r'ltq\s+orbitrap\s+elite',       'AC=MS:1001910;NT=LTQ Orbitrap Elite'),
+    (r'ltq\s+orbitrap\s+velos',       'AC=MS:1001742;NT=LTQ Orbitrap Velos'),
+    (r'ltq\s+orbitrap\s+xl',          'AC=MS:1000449;NT=LTQ Orbitrap XL'),
+    (r'ltq\s+orbitrap',               'AC=MS:1000449;NT=LTQ Orbitrap'), # Baseline match for LTQ
     
-    # 5. TOF Instruments
-    (r'zeno\s*tof',                  'NT=AB SCIEX Zeno TOF 7600'),
-    (r'triple\s*tof\s*5600',         'NT=TripleTOF 5600'),
+    # 5. TOF Instruments (Returning to peak strings)
+    (r'zeno\s*tof',                  'NT=AB SCIEX Zeno TOF 7600'), # No AC in peak
+    (r'triple\s*tof\s*5600',          'AC=MS:1002532;NT=TripleTOF 5600'),
     
     # 6. Baseline
-    (r'not\s*applicable|none',       'Not Applicable'),
+    (r'not\s*applicable|none',        'Not Applicable'),
 ]
-
 
 # Map LLM alkylation reagent names to canonical short forms
 _ALKYLATION_MAP_ = [
@@ -771,27 +819,28 @@ def _normalise_cell_line(value: str, ols_client=None) -> str:
     if not value or value.lower() in ('not applicable', 'nan', 'none', ''):
         return 'not applicable'
     
-    # 1. SPLIT internally (handles "WM266-4, WM115" or "PC3; DU145")
     parts = [p.strip() for p in re.split(r'[;,]', value) if p.strip()]
     normed_parts = []
 
     for p in parts:
-        # Check Manual Map
         res = _apply_map(p, _CELL_LINE_MAP)
         
-        # OLS Fallback if no map hit
         if res is None and ols_client:
             try:
                 hits = ols_client.cache_search(p, 'bto', full_search=True)
                 if hits:
+                    # FORCE lowercase here because OLS returns "HeLa"
                     res = hits[0].get('label', p)
             except Exception:
                 pass
         
-        # Add either the normalized result or the original part
-        normed_parts.append(res if res else p)
+        # Final result calculation
+        final_val = res if res else p
+        
+        # CRITICAL FIX: Ensure the final string is lowercase 
+        # to match the 0.2535 peak "hela", "hek293t", etc.
+        normed_parts.append(final_val.lower()) 
 
-    # 2. JOIN with semicolon (Standardizes the output for the evaluator)
     return "; ".join(normed_parts)
 
 
@@ -932,7 +981,7 @@ _CELL_PART_MAP = [
     (r'.*\bcytosol\b.*', 'cytosol'),
     (r'.*\bmitochondrion\b.*|.*\bmitochondria\b.*', 'mitochondrion'),
     (r'.*\bnucleus\b.*|.*\bnuclear\b.*', 'nucleus'),
-    (r'.*\bendoplasmic\s+reticulum\b.*|\bER\b', 'endoplasmic reticulum'),
+    (r'.*\bendoplasmic\s+reticulum\b.*|\bER\b', 'ER'),
     (r'.*\bgolgi\b.*', 'Golgi apparatus'),
     
     # 3. Vesicles & Specialized parts
