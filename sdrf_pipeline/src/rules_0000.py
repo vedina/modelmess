@@ -636,7 +636,7 @@ def rule_biological_replicate_from_filename_2(filename: str, all_filenames: list
     return "1"
 
 
-def rule_biological_replicate_from_filename_3(filename: str, all_filenames: list[str]) -> str:
+def rule_biological_replicate_from_filename(filename: str, all_filenames: list[str]) -> str:
     """
     Identifies the replicate by finding the number that varies across the dataset
     while ignoring 'stable' numbers like project IDs or catalog numbers.
@@ -645,7 +645,8 @@ def rule_biological_replicate_from_filename_3(filename: str, all_filenames: list
     from collections import Counter
     
     stem = Path(filename).stem
-    
+    stem = re.sub(r'\d+(?:C|min|h|sec|ug|ml|nM|mM)', '', stem, flags=re.IGNORECASE) # Removes 30min, 80C
+
     # 1. Extract all number sequences from EVERY filename in the set
     all_numbers_across_files = []
     for f in all_filenames:
@@ -688,7 +689,7 @@ def rule_biological_replicate_from_filename_3(filename: str, all_filenames: list
     return "1"
 
 
-def rule_biological_replicate_from_filename(filename: str, all_filenames: list[str]) -> str:
+def rule_biological_replicate_from_filename_toostrict(filename: str, all_filenames: list[str]) -> str:
     import re
     from collections import Counter
     stem = Path(filename).stem
@@ -919,6 +920,10 @@ def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
         # We pick the first file as the representative for metadata extraction
         rep_file = files[0]
         bio_rep = rule_biological_replicate_from_filename(rep_file, primary_files)
+        # sanity check
+        if int(bio_rep) > len(primary_files):  # this is smth else
+            # print(f"biorep {bio_rep} primary_files {len(primary_files)} ==> 1")
+            bio_rep = "1"
 
         for ch_idx in range(channels):
             if channels > 1:
