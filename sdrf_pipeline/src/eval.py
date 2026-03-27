@@ -215,3 +215,42 @@ def build_clusters(values: List[str], threshold: float = 0.8) -> List[List[str]]
         clusters[lbl].append(val)
 
     return list(clusters.values())
+
+
+def dataframe_diff(df1: pd.DataFrame, df2: pd.DataFrame, n_rows: int | None = None) -> pd.DataFrame:
+    # Align indices and columns
+    df1, df2 = df1.align(df2)
+
+    if n_rows is not None:
+        df1 = df1.iloc[:n_rows]
+        df2 = df2.iloc[:n_rows]
+
+    # Compute mask of differences (handle NaN properly)
+    mask = (df1 != df2) & ~(df1.isna() & df2.isna())
+
+    # Convert to long format
+    diffs = []
+    for i, j in zip(*mask.to_numpy().nonzero()):
+        diffs.append({
+            "row_index": df1.index[i],
+            "column": df1.columns[j],
+            "before": df1.iat[i, j],
+            "after": df2.iat[i, j],
+        })
+
+    return pd.DataFrame(diffs)
+
+
+def print_column_value_diffs(diff_df, column="column"):
+    for col, group in diff_df.groupby(column):
+        print(f"\nColumn: {col}")
+        
+        # unique value transitions
+        transitions = (
+            group[["before", "after"]]
+            .drop_duplicates()
+            .itertuples(index=False)
+        )
+        
+        for before, after in transitions:
+            print(f"{before} → {after}")

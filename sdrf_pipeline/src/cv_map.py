@@ -200,17 +200,30 @@ _INSTRUMENT_MAP = [
 
 # Map LLM alkylation reagent names to canonical short forms
 _ALKYLATION_MAP = [
-    (r'\biaa\b|iodoacetamide',             'IAA'),
-    (r'\bcaa\b|chloroacetamide',           'CAA'),
-    (r'\bnem\b|n.ethylmaleimide',          'NEM'),
-    (r'\bmpaq\b',                          'MPAQ'),
+    (r'\biaa\b|iodoacetamide',             'AC=MS:1002037;NT=iodoacetamide'),
+    (r'\bcaa\b|chloroacetamide',           'AC=MS:1002035;NT=chloroacetamide'),
+    (r'\bnem\b|n.ethylmaleimide',          'AC=MS:1002036;NT=N-ethylmaleimide'),
+    (r'\bmpaq\b',                          'AC=CHEBI:133036;NT=MPAQ'), # 3-(N-maleimidopropionyl)biocytin
 ]
 
 _REDUCTION_MAP = [
-    (r'\bdtt\b|dithiothreitol',            'DTT'),
-    (r'\btcep\b',                          'TCEP'),
-    (r'\bbme\b|beta.mercaptoethanol|2.mercaptoethanol', 'beta-mercaptoethanol'),
-    (r'\bdtnb\b',                          'DTNB'),
+    (r'\bdtt\b|dithiothreitol',            'AC=MS:1002031;NT=dithiothreitol'),
+    (r'\btcep\b',                          'AC=MS:1002034;NT=TCEP'),
+    (r'\bbme\b|beta.mercaptoethanol|2.mercaptoethanol', 'AC=MS:1002032;NT=2-mercaptoethanol'),
+    (r'\bdtnb\b',                          'AC=CHEBI:42232;NT=5,5-dithiobis(2-nitrobenzoic acid)'),
+]
+
+_SEX_MAP = [
+    (r'^m$|^male\b', 'male'),
+    (r'^f$|^female\b', 'female'),
+    (r'^u$|^unknown\b|^mixed\b', 'not applicable'),
+]
+
+
+_ENRICHMENT_MAP = [
+    (r'phospho|imac|tio2', 'AC=MS:1001471;NT=phosphoproteomics'),
+    (r'glyco', 'AC=MS:1001908;NT=glycoproteomics'),
+    (r'acetyl', 'AC=MS:1002456;NT=acetylation'),
 ]
 
 
@@ -345,11 +358,20 @@ class CvNormaliser:
         elif col == 'Characteristics[CellLine]':
             result = _normalise_cell_line(v, self.ols)
 
+        elif col == 'Characteristics[CellType]':
+            result = _normalise_cell_type(v, self.ols)
+
         elif col == 'Characteristics[OrganismPart]':
             result = _normalise_organism_part(v, self.ols)
 
         elif col == 'Characteristics[Disease]':
             result = _normalise_disease(v, self.ols)
+
+        elif col == 'Characteristics[Sex]':
+            result = _apply_map(v, _SEX_MAP)
+
+        elif col == 'Comment[EnrichmentMethod]':
+            result = _apply_map(v, _ENRICHMENT_MAP)          
 
         if result is not None and result != v:
             log.debug(f'{col}: {v!r} → {result!r}')
@@ -411,9 +433,12 @@ def normalise_submission(submission: pd.DataFrame,
             'Characteristics[Label]',
             'Characteristics[AlkylationReagent]',
             'Characteristics[ReductionReagent]',
+            'Characteristics[EnrichmentMethod]',
+            'Characteristics[Sex]',
         ) and not col.startswith('Characteristics[Modification')         and col not in (
             'Characteristics[Organism]',
             'Characteristics[CellLine]',
+            'Characteristics[CellType]',
             'Characteristics[OrganismPart]',
             'Characteristics[Disease]',
         ):
@@ -542,6 +567,10 @@ def _normalise_cell_line(value: str, ols_client=None) -> str:
                     hits = ols_client.cache_search(v, ontology, full_search=True)
                 if hits:
                     lbl = hits[0].get('label', v)
+                    # If the OLS label is just a lowercase version of our input, 
+                                # keep the input's casing.
+                    if lbl.lower() == v.lower():
+                        return v                    
                     return lbl if lbl else v
             except Exception:
                 continue
@@ -573,6 +602,45 @@ def _normalise_disease(value: str, ols_client=None) -> str:
     v = value.strip()
     if ols_client:
         for ontology in ('mondo', 'efo'):
+            try:
+                hits = ols_client.cache_search(v, ontology, full_search=False)
+                if not hits:
+                    hits = ols_client.cache_search(v, ontology, full_search=True)
+                if hits:
+                    lbl = hits[0].get('label', v)
+                    return lbl if lbl else v
+            except Exception:
+                continue
+    return v
+
+
+def _normalise_cell_type(value: str, ols_client=None) -> str:
+    """Normalise cell type term via CL OLS cache."""
+    if not value or value in (NA, 'not applicable', ''):
+        return value
+    v = value.strip()
+
+    if ols_client:
+        for ontology in ('cl'):
+            try:
+                hits = ols_client.cache_search(v, ontology, full_search=False)
+                if not hits:
+                    hits = ols_client.cache_search(v, ontology, full_search=True)
+                if hits:
+                    lbl = hits[0].get('label', v)
+                    return lbl if lbl else v
+            except Exception:
+                continue
+    return v
+
+
+def _normalise_devstage(value: str, ols_client=None) -> str:
+    """Normalise development stage term via PRIDE/MS OLS cache."""
+    if not value or value in (NA, 'not applicable', ''):
+        return value
+    v = value.strip()
+    if ols_client:
+        for ontology in ("ms"):
             try:
                 hits = ols_client.cache_search(v, ontology, full_search=False)
                 if not hits:
