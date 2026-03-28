@@ -150,3 +150,86 @@ def filter_by_set_size(accum: Dict[str, Set[str]], min_size=1, max_size=2) -> Di
     Keep only entries whose set size is within [min_size, max_size].
     """
     return {k: v for k, v in accum.items() if min_size <= len(v) <= max_size}
+
+
+from difflib import SequenceMatcher
+
+def merge_with_similarity(dfs, threshold=0.8):
+    """
+    Merges multiple DataFrames. If values are > threshold similar, 
+    only the most descriptive (longest) one is kept.
+    """
+    def is_similar(a, b):
+        # Calculate ratio of similarity between two strings
+        return SequenceMatcher(None, a.lower(), b.lower()).ratio() > threshold
+
+    def combine_and_dedup(values):
+        valid_parts = []
+        for val in values:
+            s_val = str(val).strip()
+            if s_val.lower() not in ['not applicable', 'nan', 'none', '']:
+                # Split current cell by semicolon
+                parts = [p.strip() for p in s_val.split(';') if p.strip()]
+                valid_parts.extend(parts)
+        
+        if not valid_parts:
+            return "Not Applicable"
+
+        # Deduplicate based on similarity threshold
+        unique_parts = []
+        for new_p in valid_parts:
+            is_duplicate = False
+            for i, existing_p in enumerate(unique_parts):
+                if is_similar(new_p, existing_p):
+                    is_duplicate = True
+                    # If the new string is more descriptive/longer, replace the old one
+                    if len(new_p) > len(existing_p):
+                        unique_parts[i] = new_p
+                    break
+            if not is_duplicate:
+                unique_parts.append(new_p)
+                
+        return "; ".join(unique_parts)
+
+    # 1. Start with structure of first DF
+    merged_df = dfs[0].copy()
+    key_cols = ['ID', 'PXD', 'Raw Data File']
+    meta_cols = [c for c in merged_df.columns if c not in key_cols]
+
+    # 2. Merge columns row-by-row
+    for col in meta_cols:
+        col_data = []
+        for i in range(len(merged_df)):
+            # Gather values from all DFs for this specific row/column
+            row_values = [df.iloc[i][col] for df in dfs]
+            col_data.append(combine_and_dedup(row_values))
+        merged_df[col] = col_data
+        
+    return merged_df
+
+# --- Usage ---
+# df_list = [df_peak, df_current]
+# final_df = merge_with_similarity(df_list, threshold=0.85)
+
+
+def competition_aware_merge(df_peak, df_new):
+    """
+    Optimized for the Kaggle SDRF-F1 Cluster Evaluator.
+    Priority: Peak Run > New Run. 
+    Only fills 'Not Applicable' holes. Never appends.
+    """
+    result = df_peak.copy()
+    meta_cols = [c for c in result.columns if c not in ['ID', 'PXD', 'Raw Data File']]
+    
+    for col in meta_cols:
+        # Define what counts as 'Missing'
+        is_missing = result[col].astype(str).str.lower().isin(['not applicable', 'nan', 'none', ''])
+        
+        # Define what the new run has to offer
+        has_info = ~df_new[col].astype(str).str.lower().isin(['not applicable', 'nan', 'none', ''])
+        
+        # Only update where Peak is missing but New has data
+        mask = is_missing & has_info
+        result.loc[mask, col] = df_new.loc[mask, col]
+        
+    return result

@@ -4,7 +4,7 @@ import difflib
 from typing import Dict, List, Tuple
 from collections import defaultdict
 from sklearn.cluster import AgglomerativeClustering
-
+from difflib import SequenceMatcher
 
 class ParticipantVisibleError(Exception):
     pass
@@ -254,3 +254,98 @@ def print_column_value_diffs(diff_df, column="column"):
         
         for before, after in transitions:
             print(f"{before} → {after}")
+
+
+import pandas as pd
+
+def find_metadata_gaps(df_peak):
+    # 1. Identify all metadata columns
+    meta_cols = [c for c in df_peak.columns if c not in ['ID', 'PXD', 'Raw Data File']]
+    
+    gap_report = []
+    
+    for col in meta_cols:
+        # Count 'Not Applicable' entries
+        is_na = df_peak[col].astype(str).str.lower().isin(['not applicable', 'nan', 'none', ''])
+        na_count = is_na.sum()
+        
+        if na_count > 0:
+            # Find which PXDs have the most gaps for this column
+            pxd_gaps = df_peak[is_na]['PXD'].unique().tolist()
+            gap_report.append({
+                'Column': col,
+                'Empty_Rows': na_count,
+                'Affected_PXDs': len(pxd_gaps)
+            })
+            
+    return pd.DataFrame(gap_report).sort_values(by='Empty_Rows', ascending=False)
+
+# Usage:
+# df_25 = pd.read_csv('submission_0.2535.csv')
+# gaps = find_metadata_gaps(df_25)
+# print(gaps.head(10))
+# 
+# from difflib import SequenceMatcher
+
+def calculate_fill_stability(df_anchor, df_new):
+    """
+    Simulates the Agglomerative Clustering logic at a 0.8 threshold.
+    Higher 'Stability' = Safe 0.2535 preservation.
+    Higher 'Fill' = Potential 0.26+ growth.
+    """
+    stats = {"gains": 0, "corruptions": 0, "perfect": 0}
+    meta_cols = [c for c in df_anchor.columns if c not in ['ID', 'PXD', 'Raw Data File']]
+    
+    for col in meta_cols:
+        for a, n in zip(df_anchor[col].astype(str), df_new[col].astype(str)):
+            a_clean, n_clean = a.strip().lower(), n.strip().lower()
+            
+            # Case 1: Filling a hole (The Goal)
+            if a_clean in ['not applicable', 'nan'] and n_clean not in ['not applicable', 'nan']:
+                stats["gains"] += 1
+            
+            # Case 2: Changing existing data (The Risk)
+            elif a_clean not in ['not applicable', 'nan']:
+                sim = SequenceMatcher(None, a_clean, n_clean).ratio()
+                if sim >= 0.8:
+                    stats["perfect"] += 1 # Stays in the same cluster
+                else:
+                    stats["corruptions"] += 1 # Forces a new cluster (BAD)
+                    
+    print(f"--- Metric Analysis ---")
+    print(f"Recall Gains: {stats['gains']} holes filled.")
+    print(f"Precision Risks: {stats['corruptions']} clusters broken.")
+    return stats        
+
+
+def suggest_next_fills(df_peak):
+    suggestions = []
+    meta_cols = [c for c in df_peak.columns if c not in ['ID', 'PXD', 'Raw Data File']]
+    
+    for col in meta_cols:
+        # Group by PXD to see the 'local' consensus
+        for pxd, group in df_peak.groupby('PXD'):
+            na_count = group[col].astype(str).str.lower().isin(['not applicable', 'nan']).sum()
+            total = len(group)
+            
+            if 0 < na_count < total:
+                # This is a 'Sparse Cluster' - High Value Target
+                # Suggest filling NAs with the most frequent non-NA value in this PXD
+                consensus_val = group[col][~group[col].isin(['Not Applicable'])].mode()
+                if not consensus_val.empty:
+                    suggestions.append({
+                        'PXD': pxd, 'Column': col, 
+                        'Priority': 'High (Consistency)', 
+                        'Suggested_Val': consensus_val[0],
+                        'Gain_Potential': na_count
+                    })
+            elif na_count == total:
+                # This is a 'Void' - Needs LLM Inference
+                suggestions.append({
+                    'PXD': pxd, 'Column': col, 
+                    'Priority': 'Medium (Discovery)', 
+                    'Suggested_Val': 'LLM_NEEDED',
+                    'Gain_Potential': total
+                })
+                
+    return pd.DataFrame(suggestions).sort_values('Gain_Potential', ascending=False)    
