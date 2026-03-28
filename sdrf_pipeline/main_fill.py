@@ -1,37 +1,37 @@
 #!/usr/bin/env python3
 """
-SDRF Extraction — two-stage pipeline
+SDRF Extraction -- two-stage pipeline
 =====================================
 
 Three stages, selectable via --stage:
 
-  rules  — rule-based extraction only; writes CSVs to --rules-dir
-  llm    — LLM gap-fill only; reads from --fill-from (or --rules-dir),
-           writes to --llm-dir.  Requires paper JSONs for context.
-  both   — runs rules then llm in sequence (default)
+  rules  -- rule-based extraction only; writes CSVs to --rules-dir
+  llm    -- LLM gap-fill only; reads from --fill-from (or --rules-dir),
+            writes to --llm-dir.  Requires paper JSONs for context.
+  both   -- runs rules then llm in sequence (default)
 
 Typical iterative workflow
 --------------------------
   # 1. Bootstrap rule output once (fast, free)
   python main_fill.py papers/ --stage rules --rules-dir output/rules
 
-  # 2. Fill gaps with model A
+  # 2. Dump default prompts to a file, then edit them
+  python main_fill.py papers/ --dump-prompts my_prompts.toml
+
+  # 3. Fill gaps with model A, custom prompts
   python main_fill.py papers/ --stage llm \\
       --fill-from output/rules --llm-dir output/llm_gpt4o \\
-      --model gpt-4o --api-key $OPENAI_API_KEY
+      --model gpt-4o --api-key $OPENAI_API_KEY \\
+      --prompts my_prompts.toml
 
-  # 3. Fill gaps with model B (same rules, different output folder)
+  # 4. Fill gaps with model B (same rules, different output folder)
   python main_fill.py papers/ --stage llm \\
       --fill-from output/rules --llm-dir output/llm_llama \\
       --model llama3.1:70b --base-url http://localhost:11434/v1 --api-key ollama
 
-  # 4. Re-fill a subset (pass a folder of specific rule CSVs)
+  # 5. Re-fill a subset (pass a folder of specific rule CSVs)
   python main_fill.py papers/ --stage llm \\
       --fill-from output/rules_subset --llm-dir output/llm_retry
-
-Single-file mode (batch inferred from directory input)
-------------------------------------------------------
-  python main_fill.py PXD004010_PubText.json --stage both
 """
 
 import argparse
@@ -44,7 +44,8 @@ from typing import Optional
 
 NA = "not applicable"
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+
+# -- Logging ------------------------------------------------------------------
 
 def _setup_logging(verbose: bool) -> None:
     logging.basicConfig(
@@ -54,7 +55,7 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
-# ── CSV ↔ SDRFDocument round-trip ─────────────────────────────────────────────
+# -- CSV <-> SDRFDocument round-trip ------------------------------------------
 
 def _csv_to_sdrf_doc(csv_path: Path):
     """
@@ -64,18 +65,15 @@ def _csv_to_sdrf_doc(csv_path: Path):
     from src.models import SDRFDocument, SDRFRow
     from src.pipeline import HEADER_TO_ATTR
 
-    attr_to_header = {v: k for k, v in HEADER_TO_ATTR.items()}
     rows = []
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for csv_row in reader:
-            # Map SDRF header names → SDRFRow attribute names
             kwargs: dict[str, str] = {}
             for header, value in csv_row.items():
                 attr = HEADER_TO_ATTR.get(header)
                 if attr:
                     kwargs[attr] = value if value else NA
-            # SDRFRow requires raw_data_file; guard against malformed CSVs
             if "raw_data_file" not in kwargs:
                 continue
             try:
@@ -95,10 +93,10 @@ def _write_csv(doc, output_path: Path) -> None:
         for row in doc.rows:
             d = row.model_dump()
             writer.writerow({h: d.get(a, NA) for h, a in HEADER_TO_ATTR.items()})
-    logging.info("Written %d rows → %s", len(doc.rows), output_path)
+    logging.info("Written %d rows -> %s", len(doc.rows), output_path)
 
 
-# ── Stage 1: rules ────────────────────────────────────────────────────────────
+# -- Stage 1: rules -----------------------------------------------------------
 
 def run_rules(json_path: Path, rules_dir: Path):
     """
@@ -113,23 +111,23 @@ def run_rules(json_path: Path, rules_dir: Path):
     row0 = doc.rows[0].model_dump() if doc.rows else {}
     n_filled = sum(1 for v in row0.values() if v != NA)
     logging.info(
-        "[rules] %s → %d rows, %d/%d fields filled in row 0",
+        "[rules] %s -> %d rows, %d/%d fields filled in row 0",
         json_path.name, len(doc.rows), n_filled, len(row0),
     )
 
     out_csv = rules_dir / json_path.with_suffix(".sdrf.csv").name
-    if len(doc.rows) > 0:
+    if doc.rows:
         _write_csv(doc, out_csv)
     else:
-        logging.warning(f"Empty document skipping {out_csv}")
+        logging.warning("Empty document, skipping %s", out_csv)
     return doc
 
 
-# ── Stage 2: llm ─────────────────────────────────────────────────────────────
+# -- Stage 2: llm -------------------------------------------------------------
 
 def run_llm(
     json_path: Path,
-    rules_doc,           # SDRFDocument from stage 1 (or loaded from CSV)
+    rules_doc,
     llm_dir: Path,
     api_key: str,
     base_url: Optional[str],
@@ -137,6 +135,7 @@ def run_llm(
     max_tokens: int,
     context_limit: int,
     deduplicate: bool,
+    prompts,            # PromptConfig or None
 ) -> None:
     """
     Run LLM gap-fill for one paper JSON, given a partially-filled SDRFDocument.
@@ -153,6 +152,7 @@ def run_llm(
         max_tokens=max_tokens,
         context_limit=context_limit,
         deduplicate=deduplicate,
+        prompts=prompts,
     )
     final = filler.fill(paper, rules_doc)
 
@@ -161,7 +161,7 @@ def run_llm(
     n_before = sum(1 for v in row0_before.values() if v != NA)
     n_after  = sum(1 for v in row0_after.values()  if v != NA)
     logging.info(
-        "[llm]   %s → %d/%d fields filled in row 0 (+%d via LLM)",
+        "[llm]   %s -> %d/%d fields filled in row 0 (+%d via LLM)",
         json_path.name, n_after, len(row0_after), n_after - n_before,
     )
 
@@ -169,7 +169,7 @@ def run_llm(
     _write_csv(final, out_csv)
 
 
-# ── Per-file dispatcher ───────────────────────────────────────────────────────
+# -- Per-file dispatcher ------------------------------------------------------
 
 def process_one(
     json_path: Path,
@@ -183,11 +183,11 @@ def process_one(
     max_tokens: int,
     context_limit: int,
     deduplicate: bool,
+    prompts,            # PromptConfig or None
 ) -> None:
     stem_csv = json_path.with_suffix(".sdrf.csv").name
 
     if stage in ("rules", "both"):
-        # Always run rules and write to rules_dir
         rules_doc = run_rules(json_path, rules_dir)
     else:
         # stage == "llm": load rules CSV from fill_from (or rules_dir fallback)
@@ -198,37 +198,38 @@ def process_one(
             rules_doc = _csv_to_sdrf_doc(candidate)
         else:
             logging.warning(
-                "[llm] Rules CSV not found at %s — running rules first.", candidate
+                "[llm] Rules CSV not found at %s -- running rules first.", candidate
             )
             rules_dir.mkdir(parents=True, exist_ok=True)
             rules_doc = run_rules(json_path, rules_dir)
 
     if stage in ("llm", "both"):
         if not api_key:
-            logging.warning("No API key — skipping LLM stage for %s.", json_path.name)
+            logging.warning("No API key -- skipping LLM stage for %s.", json_path.name)
             return
         run_llm(
             json_path, rules_doc, llm_dir,
             api_key, base_url, model, max_tokens, context_limit, deduplicate,
+            prompts,
         )
 
 
-# ── CLI ───────────────────────────────────────────────────────────────────────
+# -- CLI ----------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="SDRF extraction — rules + LLM gap-fill pipeline.",
+        description="SDRF extraction -- rules + LLM gap-fill pipeline.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
 
-    # ── Input ──────────────────────────────────────────────────────────────
+    # Input
     p.add_argument(
         "input",
         help=(
-            "Paper JSON source. Two forms accepted:\n"
-            "  directory/        → all *.json files in that folder\n"
-            "  path/to/file.json → single file\n"
+            "Paper JSON source. Two forms:\n"
+            "  directory/        -> all *.json files in that folder\n"
+            "  path/to/file.json -> single file\n"
             "Use --pattern to filter files inside a directory."
         ),
     )
@@ -236,28 +237,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--pattern",
         default="*.json",
         metavar="GLOB",
-        help=(
-            "Glob pattern applied inside the input directory "
-            "(default: *.json). "
-            "Example: --pattern 'PXD06*.json'"
-        ),
+        help="Glob pattern inside the input directory (default: *.json). "
+             "Example: --pattern 'PXD06*.json'",
     )
 
-    # ── Stage ─────────────────────────────────────────────────────────────
+    # Stage
     p.add_argument(
         "--stage",
         choices=["rules", "llm", "both"],
         default="both",
         help="Which stage(s) to run (default: both).",
     )
-    # Backwards-compat alias
     p.add_argument(
         "--rules-only",
         action="store_true",
-        help="Alias for --stage rules.",
+        help="Alias for --stage rules (backwards compat).",
     )
 
-    # ── Output folders ─────────────────────────────────────────────────────
+    # Output folders
     p.add_argument(
         "--rules-dir",
         default="output/rules",
@@ -272,32 +269,43 @@ def build_parser() -> argparse.ArgumentParser:
         "--fill-from",
         default=None,
         metavar="DIR",
-        help=(
-            "For --stage llm: folder of pre-computed rule CSVs to use as input. "
-            "If a file is missing, rules are re-run automatically. "
-            "Defaults to --rules-dir."
-        ),
+        help="For --stage llm: folder of pre-computed rule CSVs to use as input. "
+             "Falls back to --rules-dir if a file is missing.",
     )
 
-    # ── LLM config ─────────────────────────────────────────────────────────
-    p.add_argument("--api-key",    default=None,          help="LLM API key (default: OPENAI_API_KEY env).")
-    p.add_argument("--base-url",   default=None,          help="OpenAI-compatible base URL.")
-    p.add_argument("--model",      default="gpt-4o-mini", help="Model name (default: gpt-4o-mini).")
+    # LLM config
+    p.add_argument("--api-key",    default=None,           help="LLM API key (default: OPENAI_API_KEY env).")
+    p.add_argument("--base-url",   default=None,           help="OpenAI-compatible base URL.")
+    p.add_argument("--model",      default="gpt-4o-mini",  help="Model name (default: gpt-4o-mini).")
     p.add_argument("--max-tokens", type=int, default=8192, help="Max LLM response tokens (default: 8192).")
-    p.add_argument("--no-dedup",      action="store_true",   help="Disable row deduplication (one LLM call/row).")
     p.add_argument(
         "--context-limit",
         type=int,
         default=32_000,
         metavar="TOKENS",
-        help=(
-            "Model context window size in tokens used for trimming paper text "
-            "(default: 32000). "
-            "Examples: 8192 for older models, 128000 for gpt-4o."
-        ),
+        help="Context window size in tokens for trimming paper text "
+             "(default: 32000). Examples: 8192 for older models, 128000 for gpt-4o.",
+    )
+    p.add_argument("--no-dedup", action="store_true", help="One LLM call per row (disables deduplication).")
+
+    # Prompts
+    p.add_argument(
+        "--prompts",
+        default=None,
+        metavar="TOML",
+        help="Path to a TOML file overriding prompt templates. "
+             "Missing sections fall back to built-in defaults. "
+             "Use --dump-prompts to generate a starting file.",
+    )
+    p.add_argument(
+        "--dump-prompts",
+        default=None,
+        metavar="TOML",
+        help="Write the current default prompts to TOML and exit. "
+             "Example: --dump-prompts prompts.toml",
     )
 
-    # ── Misc ───────────────────────────────────────────────────────────────
+    # Misc
     p.add_argument("--verbose", "-v", action="store_true")
 
     return p
@@ -308,14 +316,27 @@ def main() -> None:
     args = parser.parse_args()
     _setup_logging(args.verbose)
 
-    # Backwards compat: --rules-only → --stage rules
+    # --dump-prompts: write defaults to file and exit
+    if args.dump_prompts:
+        from src.prompts import PromptConfig
+        out = PromptConfig.defaults().to_toml(args.dump_prompts)
+        print(f"Default prompts written to: {out}")
+        sys.exit(0)
+
+    # Backwards compat
     stage = "rules" if args.rules_only else args.stage
 
-    api_key       = args.api_key or os.environ.get("OPENAI_API_KEY", "")
-    context_limit = args.context_limit
-    rules_dir = Path(args.rules_dir)
-    llm_dir   = Path(args.llm_dir)
-    fill_from = Path(args.fill_from) if args.fill_from else None
+    # Load prompt config (None -> LLMFillGaps uses defaults internally)
+    prompts = None
+    if args.prompts:
+        from src.prompts import PromptConfig
+        prompts = PromptConfig.from_toml(args.prompts)
+        logging.info("Loaded prompts from %s", args.prompts)
+
+    api_key     = args.api_key or os.environ.get("OPENAI_API_KEY", "")
+    rules_dir   = Path(args.rules_dir)
+    llm_dir     = Path(args.llm_dir)
+    fill_from   = Path(args.fill_from) if args.fill_from else None
     deduplicate = not args.no_dedup
 
     # Ensure output dirs exist
@@ -326,24 +347,22 @@ def main() -> None:
 
     inp = Path(args.input)
 
-    # ── Collect files ──────────────────────────────────────────────────────
+    # Collect files
     if inp.is_dir():
         pattern = args.pattern
         json_files = sorted(inp.glob(pattern))
         if not json_files:
             parser.error(f"No files matched '{pattern}' in {inp}")
-        logging.info(
-            "Pattern '%s' in %s → %d file(s)", pattern, inp, len(json_files)
-        )
+        logging.info("Pattern '%s' in %s -> %d file(s)", pattern, inp, len(json_files))
     elif inp.is_file():
         json_files = [inp]
     else:
         parser.error(f"Input not found: {inp}")
 
-    # ── Process ────────────────────────────────────────────────────────────
+    # Process
     ok = 0
     for i, jf in enumerate(json_files, 1):
-        logging.info("── [%d/%d] %s ──", i, len(json_files), jf.name)
+        logging.info("-- [%d/%d] %s --", i, len(json_files), jf.name)
         try:
             process_one(
                 json_path=jf,
@@ -357,20 +376,21 @@ def main() -> None:
                 max_tokens=args.max_tokens,
                 context_limit=args.context_limit,
                 deduplicate=deduplicate,
+                prompts=prompts,
             )
             ok += 1
         except Exception as e:
             logging.error("FAILED %s: %s", jf.name, e, exc_info=args.verbose)
 
-    # ── Summary ────────────────────────────────────────────────────────────
+    # Summary
     total = len(json_files)
-    print(f"\n✓ {ok}/{total} file(s) processed.")
+    print(f"\n{ok}/{total} file(s) processed.")
     if stage in ("rules", "both"):
-        print(f"  Rules CSVs → {rules_dir}/")
+        print(f"  Rules CSVs -> {rules_dir}/")
     if stage in ("llm", "both"):
-        print(f"  LLM CSVs   → {llm_dir}/")
+        print(f"  LLM CSVs   -> {llm_dir}/")
     if ok < total:
-        print(f"  {total - ok} file(s) failed — check logs above.")
+        print(f"  {total - ok} file(s) failed -- check logs above.")
 
 
 if __name__ == "__main__":

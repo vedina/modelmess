@@ -43,15 +43,14 @@ from typing import Optional
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from tiktoken import encoding_for_model
 
 from src.models import SDRFDocument, SDRFRow
 from src.fields import FIELDS, FIELD_BY_ATTR
+from src.prompts import PromptConfig
 from src.rules_0000 import PaperJSON
 from src.pipeline import SDRF_HEADERS, HEADER_TO_ATTR, _repair_json
 
 logger = logging.getLogger(__name__)
-MAX_CONTEXT = 32768  # gpt-4o limit
 NA = "not applicable"
 
 # ── Field lookup: attr → SDRFField ────────────────────────────────────────────
@@ -107,32 +106,45 @@ def _trim_paper_to_budget(
     na_attrs: list[str],
     context_limit: int,
     max_output_tokens: int,
+    system_prompt: str = "",
 ) -> tuple[str, str, str]:
     """
-    Return (title, abstract, methods) trimmed so that the full pass-1
-    prompt fits within context_limit tokens.
+    Return (title, abstract, methods) trimmed so that pass-1 input tokens
+    fit within context_limit.
 
-    Budget allocation
-    -----------------
-    fixed   = system prompt + field list + mini guide + pass-1 template overhead
-    paper   = whatever is left after reserving fixed + max_output_tokens
+    Budget
+    ------
+    available_for_paper = context_limit
+                          - max_output_tokens        # space the model needs to reply
+                          - fixed_overhead            # system + field list + guide
+                          - SAFETY_MARGIN             # extra buffer for tokeniser
+                                                      # approximation errors
 
-    Within the paper budget, title is kept whole; abstract and methods
-    are trimmed proportionally to their original lengths.
+    Title is always kept whole. Abstract and methods are trimmed
+    proportionally if needed.
     """
+    # Extra headroom beyond the estimate to absorb chars/4 approximation error.
+    # Set to 5% of context_limit (minimum 500 tokens).
+    SAFETY_MARGIN = max(500, context_limit // 20)
+
     na_text    = "\n".join(
         f"- {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}" for a in na_attrs
     )
     guide_text = _mini_guide(na_attrs)
-    # Overhead: system + field list + guide + prompt scaffolding (~200 tok)
-    fixed_tokens = (_count_tokens_approx(_SYSTEM + na_text + guide_text) + 200)
+    # Use the actual system prompt text passed in (falls back to empty string
+    # which underestimates slightly, but the safety margin compensates).
+    fixed_tokens = (
+        _count_tokens_approx(system_prompt + na_text + guide_text)
+        + 200           # template scaffolding (headers, separators, etc.)
+        + SAFETY_MARGIN
+    )
 
     available = context_limit - max_output_tokens - fixed_tokens
     if available <= 0:
         logger.warning(
-            "Context budget too tight (limit=%d, fixed=%d, output=%d) — "
-            "sending title only.",
-            context_limit, fixed_tokens, max_output_tokens,
+            "Context budget too tight (limit=%d, output=%d, fixed=%d) "
+            "-- sending title only.",
+            context_limit, max_output_tokens, fixed_tokens,
         )
         return paper.title, "", ""
 
@@ -146,133 +158,29 @@ def _trim_paper_to_budget(
     paper_tokens    = title_tokens + abstract_tokens + methods_tokens
 
     if paper_tokens <= available:
-        return title, abstract, methods   # fits — no trimming needed
+        return title, abstract, methods   # fits -- no trimming needed
 
     # Title is always kept whole; trim abstract + methods proportionally.
     remaining = available - title_tokens
     if remaining <= 0:
         return title[:available * _CHARS_PER_TOKEN], "", ""
 
-    body_tokens = abstract_tokens + methods_tokens
-    ratio = remaining / body_tokens
-
+    ratio = remaining / (abstract_tokens + methods_tokens)
     abstract_chars = int(len(abstract) * ratio)
     methods_chars  = int(len(methods)  * ratio)
 
-    trimmed_abstract = abstract[:abstract_chars]
-    trimmed_methods  = methods[:methods_chars]
-
     logger.warning(
-        "Paper text trimmed to fit context (limit=%d tok): "
-        "abstract %d→%d chars, methods %d→%d chars.",
-        context_limit,
+        "Paper text trimmed to fit context (limit=%d tok, margin=%d): "
+        "abstract %d->%d chars, methods %d->%d chars.",
+        context_limit, SAFETY_MARGIN,
         len(abstract), abstract_chars,
         len(methods),  methods_chars,
     )
-    return title, trimmed_abstract, trimmed_methods
+    return title, abstract[:abstract_chars], methods[:methods_chars]
 
-# ── Prompts ───────────────────────────────────────────────────────────────────
-
-_SYSTEM = """You are a proteomics SDRF metadata extraction assistant.
-
-You are given ONE experiment with multiple samples (rows).
-
-Your task is to fill missing fields ('not applicable') and extend existing ones across ALL rows.
-
-You must:
-- maintain consistency across the experiment
-- assign sample-specific values correctly
-- avoid contradictions
-
-RULES:
-
-ATTRIBUTE RULES:
-- Use ONLY provided snake_case attribute names
-- Do NOT invent fields
-
-VALUE RULES:
-- If value is "not applicable" → fill it if possible
-- If value exists → DO NOT overwrite
-    • you MAY append using ";" if new valid info exists
-
-EVIDENCE RULES:
-- Primary source: manuscript text
-- Secondary: filenames (ONLY for per-sample mapping)
-
-FACTOR VARIABLE RULES:
-- return lists of factor names (sample characteristics explicitly described as comparisons) in factor_values
-- Do NOT infer study design from filenames alone
-
-FILENAME RULES:
-- Use parsed filenames ONLY to:
-    • distinguish samples
-    • assign replicate numbers
-    • map known conditions to correct rows
-
-Return JSON only."""
-
-
-def _pass1_human(
-    paper: PaperJSON,
-    na_attrs: list[str],
-    context_limit: int,
-    max_output_tokens: int,
-) -> str:
-    """Ask LLM to scan the paper for specific missing fields (free-text inventory)."""
-    guide = _mini_guide(na_attrs)
-    field_names = "\n".join(
-        f"  - {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}" for a in na_attrs
-    )
-    title, abstract, methods = _trim_paper_to_budget(
-        paper, na_attrs, context_limit, max_output_tokens
-    )
-    return f"""Read the paper sections below and find values for these MISSING fields:
-
-{field_names}
-
-FIELD GUIDE (what each field means and example values):
-{guide}
-
-For each field you find evidence for, write ONE line:
-  FIELD: <field name> -> VALUE: <value>  (SOURCE: "<exact phrase>")
-
-Skip fields with no evidence. Do NOT output JSON yet.
-
---- TITLE ---
-{title}
-
---- ABSTRACT ---
-{abstract}
-
---- METHODS ---
-{methods}
-"""
-
-
-def _pass2_human(na_attrs: list[str], known_summary: str) -> str:
-    """Ask LLM to convert its inventory into a JSON patch for the N/A fields."""
-    attr_list = "\n".join(f"- {a}" for a in na_attrs)
-    return f"""Based on your findings above, output a JSON object.
-
-You MUST use EXACT attribute keys (snake_case) listed below:
-
-{attr_list}
-
-Rules:
-- Use ONLY these keys (do not invent new ones)
-- Use "not applicable" only if not relevant to the experiment
-- Already-known values - DO NOT REPLACE with "not applicable!". You may APPEND additional valid values using ; :
-  {known_summary}
-
-Return JSON only, no commentary.
-
-Example:
-{{
-  "instrument": "Orbitrap Fusion",
-  "fragmentation_method": "HCD",
-  "factors" : ["time"]
-}}
-"""
+# ── Default prompts singleton ─────────────────────────────────────────────────
+# Used when LLMFillGaps is constructed without an explicit PromptConfig.
+_DEFAULT_PROMPTS: PromptConfig = PromptConfig.defaults()
 
 
 # ── Main class ────────────────────────────────────────────────────────────────
@@ -301,11 +209,13 @@ class LLMFillGaps:
         max_tokens: int = 2048,
         context_limit: int = 32_000,
         deduplicate: bool = True,
+        prompts: Optional[PromptConfig] = None,
         debug: bool = False,
     ):
         self.deduplicate = deduplicate
         self.max_tokens = max_tokens
         self.context_limit = context_limit
+        self.prompts = prompts if prompts is not None else _DEFAULT_PROMPTS
         self.llm = ChatOpenAI(
             api_key=api_key,
             model=model,
@@ -402,20 +312,43 @@ class LLMFillGaps:
         """Two-pass LLM call → returns {attr: value} patch dict."""
         known = _known_summary(row)
 
-        # Pass 1: free-text inventory (paper text trimmed to fit context window)
+        # Build pass-1 message: dynamic parts (field list, guide, paper) injected here
+        guide = _mini_guide(na_attrs)
+        field_names = "\n".join(
+            f"  - {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}"
+            for a in na_attrs
+        )
+        title, abstract, methods = _trim_paper_to_budget(
+            paper, na_attrs, self.context_limit, self.max_tokens,
+            system_prompt=self.prompts.system,
+        )
+        pass1_text = self.prompts.render_pass1(
+            field_names=field_names,
+            guide=guide,
+            title=title,
+            abstract=abstract,
+            methods=methods,
+        )
+
+        # Pass 1: free-text inventory
         messages: list = [
-            SystemMessage(content=_SYSTEM),
-            HumanMessage(content=_pass1_human(
-                paper, na_attrs, self.context_limit, self.max_tokens
-            )),
+            SystemMessage(content=self.prompts.system),
+            HumanMessage(content=pass1_text),
         ]
         inventory = self._call_llm(messages)
         logger.debug("Inventory (%d chars): %s…", len(inventory), inventory[:300])
 
+        # Build pass-2 message: attr list + already-known values
+        attr_list = "\n".join(f"- {a}" for a in na_attrs)
+        pass2_text = self.prompts.render_pass2(
+            attr_list=attr_list,
+            known_summary=known,
+        )
+
         # Pass 2: JSON patch (inventory already in context, no paper re-send)
         messages += [
             AIMessage(content=inventory),
-            HumanMessage(content=_pass2_human(na_attrs, known)),
+            HumanMessage(content=pass2_text),
         ]
         raw = self._call_llm(messages)
         if self.debug:
