@@ -92,34 +92,84 @@ def _mini_guide(attrs: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _truncate_text_for_context(paper: PaperJSON, na_attrs: list[str], max_output_tokens: int = 2048) -> tuple[str, str, str]:
-    """
-    Truncate TITLE / ABSTRACT / METHODS to fit model context.
-    Returns (title, abstract, methods) that fit.
-    """
-    enc = encoding_for_model("gpt-4o")
-    
-    title = paper.title
-    abstract = paper.abstract
-    methods = paper.methods
+# ── Token / char budget ──────────────────────────────────────────────────────
+# 1 token ≈ 4 chars for English prose — good enough for a trim budget.
+_CHARS_PER_TOKEN = 4
 
-    # Estimate tokens
-    na_text = "\n".join(f"- {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}" for a in na_attrs)
+
+def _count_tokens_approx(text: str) -> int:
+    """Fast, model-agnostic token estimate (chars / 4)."""
+    return max(1, len(text) // _CHARS_PER_TOKEN)
+
+
+def _trim_paper_to_budget(
+    paper: PaperJSON,
+    na_attrs: list[str],
+    context_limit: int,
+    max_output_tokens: int,
+) -> tuple[str, str, str]:
+    """
+    Return (title, abstract, methods) trimmed so that the full pass-1
+    prompt fits within context_limit tokens.
+
+    Budget allocation
+    -----------------
+    fixed   = system prompt + field list + mini guide + pass-1 template overhead
+    paper   = whatever is left after reserving fixed + max_output_tokens
+
+    Within the paper budget, title is kept whole; abstract and methods
+    are trimmed proportionally to their original lengths.
+    """
+    na_text    = "\n".join(
+        f"- {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}" for a in na_attrs
+    )
     guide_text = _mini_guide(na_attrs)
-    fixed_tokens = len(enc.encode(_SYSTEM + na_text + guide_text))
+    # Overhead: system + field list + guide + prompt scaffolding (~200 tok)
+    fixed_tokens = (_count_tokens_approx(_SYSTEM + na_text + guide_text) + 200)
 
-    paper_tokens = len(enc.encode(title + abstract + methods))
-    allowed_tokens = MAX_CONTEXT - max_output_tokens - fixed_tokens
+    available = context_limit - max_output_tokens - fixed_tokens
+    if available <= 0:
+        logger.warning(
+            "Context budget too tight (limit=%d, fixed=%d, output=%d) — "
+            "sending title only.",
+            context_limit, fixed_tokens, max_output_tokens,
+        )
+        return paper.title, "", ""
 
-    if paper_tokens <= allowed_tokens:
-        return title, abstract, methods
+    title    = paper.title
+    abstract = paper.abstract
+    methods  = paper.methods
 
-    # Truncate proportionally (title usually small, abstract ~30%, methods ~70%)
-    ratio = allowed_tokens / paper_tokens
-    abstract_limit = int(len(abstract) * ratio)
-    methods_limit = int(len(methods) * ratio)
+    title_tokens    = _count_tokens_approx(title)
+    abstract_tokens = _count_tokens_approx(abstract)
+    methods_tokens  = _count_tokens_approx(methods)
+    paper_tokens    = title_tokens + abstract_tokens + methods_tokens
 
-    return title, abstract[:abstract_limit], methods[:methods_limit]
+    if paper_tokens <= available:
+        return title, abstract, methods   # fits — no trimming needed
+
+    # Title is always kept whole; trim abstract + methods proportionally.
+    remaining = available - title_tokens
+    if remaining <= 0:
+        return title[:available * _CHARS_PER_TOKEN], "", ""
+
+    body_tokens = abstract_tokens + methods_tokens
+    ratio = remaining / body_tokens
+
+    abstract_chars = int(len(abstract) * ratio)
+    methods_chars  = int(len(methods)  * ratio)
+
+    trimmed_abstract = abstract[:abstract_chars]
+    trimmed_methods  = methods[:methods_chars]
+
+    logger.warning(
+        "Paper text trimmed to fit context (limit=%d tok): "
+        "abstract %d→%d chars, methods %d→%d chars.",
+        context_limit,
+        len(abstract), abstract_chars,
+        len(methods),  methods_chars,
+    )
+    return title, trimmed_abstract, trimmed_methods
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
@@ -162,11 +212,20 @@ FILENAME RULES:
 Return JSON only."""
 
 
-def _pass1_human(paper: PaperJSON, na_attrs: list[str]) -> str:
+def _pass1_human(
+    paper: PaperJSON,
+    na_attrs: list[str],
+    context_limit: int,
+    max_output_tokens: int,
+) -> str:
     """Ask LLM to scan the paper for specific missing fields (free-text inventory)."""
     guide = _mini_guide(na_attrs)
-    field_names = "\n".join(f"  - {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}"
-                            for a in na_attrs)
+    field_names = "\n".join(
+        f"  - {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}" for a in na_attrs
+    )
+    title, abstract, methods = _trim_paper_to_budget(
+        paper, na_attrs, context_limit, max_output_tokens
+    )
     return f"""Read the paper sections below and find values for these MISSING fields:
 
 {field_names}
@@ -180,13 +239,13 @@ For each field you find evidence for, write ONE line:
 Skip fields with no evidence. Do NOT output JSON yet.
 
 --- TITLE ---
-{paper.title}
+{title}
 
 --- ABSTRACT ---
-{paper.abstract}
+{abstract}
 
 --- METHODS ---
-{paper.methods}
+{methods}
 """
 
 
@@ -240,10 +299,13 @@ class LLMFillGaps:
         base_url: Optional[str] = None,
         temperature: float = 0.0,
         max_tokens: int = 2048,
+        context_limit: int = 32_000,
         deduplicate: bool = True,
-        debug: bool = False
+        debug: bool = False,
     ):
         self.deduplicate = deduplicate
+        self.max_tokens = max_tokens
+        self.context_limit = context_limit
         self.llm = ChatOpenAI(
             api_key=api_key,
             model=model,
@@ -340,10 +402,12 @@ class LLMFillGaps:
         """Two-pass LLM call → returns {attr: value} patch dict."""
         known = _known_summary(row)
 
-        # Pass 1: free-text inventory
+        # Pass 1: free-text inventory (paper text trimmed to fit context window)
         messages: list = [
             SystemMessage(content=_SYSTEM),
-            HumanMessage(content=_pass1_human(paper, na_attrs)),
+            HumanMessage(content=_pass1_human(
+                paper, na_attrs, self.context_limit, self.max_tokens
+            )),
         ]
         inventory = self._call_llm(messages)
         logger.debug("Inventory (%d chars): %s…", len(inventory), inventory[:300])

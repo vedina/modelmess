@@ -135,6 +135,7 @@ def run_llm(
     base_url: Optional[str],
     model: str,
     max_tokens: int,
+    context_limit: int,
     deduplicate: bool,
 ) -> None:
     """
@@ -150,6 +151,7 @@ def run_llm(
         base_url=base_url,
         model=model,
         max_tokens=max_tokens,
+        context_limit=context_limit,
         deduplicate=deduplicate,
     )
     final = filler.fill(paper, rules_doc)
@@ -179,6 +181,7 @@ def process_one(
     base_url: Optional[str],
     model: str,
     max_tokens: int,
+    context_limit: int,
     deduplicate: bool,
 ) -> None:
     stem_csv = json_path.with_suffix(".sdrf.csv").name
@@ -206,7 +209,7 @@ def process_one(
             return
         run_llm(
             json_path, rules_doc, llm_dir,
-            api_key, base_url, model, max_tokens, deduplicate,
+            api_key, base_url, model, max_tokens, context_limit, deduplicate,
         )
 
 
@@ -281,7 +284,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--base-url",   default=None,          help="OpenAI-compatible base URL.")
     p.add_argument("--model",      default="gpt-4o-mini", help="Model name (default: gpt-4o-mini).")
     p.add_argument("--max-tokens", type=int, default=8192, help="Max LLM response tokens (default: 8192).")
-    p.add_argument("--no-dedup",   action="store_true",   help="Disable row deduplication (one LLM call/row).")
+    p.add_argument("--no-dedup",      action="store_true",   help="Disable row deduplication (one LLM call/row).")
+    p.add_argument(
+        "--context-limit",
+        type=int,
+        default=32_000,
+        metavar="TOKENS",
+        help=(
+            "Model context window size in tokens used for trimming paper text "
+            "(default: 32000). "
+            "Examples: 8192 for older models, 128000 for gpt-4o."
+        ),
+    )
 
     # ── Misc ───────────────────────────────────────────────────────────────
     p.add_argument("--verbose", "-v", action="store_true")
@@ -297,7 +311,8 @@ def main() -> None:
     # Backwards compat: --rules-only → --stage rules
     stage = "rules" if args.rules_only else args.stage
 
-    api_key   = args.api_key or os.environ.get("OPENAI_API_KEY", "")
+    api_key       = args.api_key or os.environ.get("OPENAI_API_KEY", "")
+    context_limit = args.context_limit
     rules_dir = Path(args.rules_dir)
     llm_dir   = Path(args.llm_dir)
     fill_from = Path(args.fill_from) if args.fill_from else None
@@ -340,6 +355,7 @@ def main() -> None:
                 base_url=args.base_url,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                context_limit=args.context_limit,
                 deduplicate=deduplicate,
             )
             ok += 1
