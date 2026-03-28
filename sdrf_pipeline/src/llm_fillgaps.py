@@ -43,6 +43,7 @@ from typing import Optional
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from tiktoken import encoding_for_model
 
 from src.models import SDRFDocument, SDRFRow
 from src.fields import FIELDS, FIELD_BY_ATTR
@@ -50,7 +51,7 @@ from src.rules_0000 import PaperJSON
 from src.pipeline import SDRF_HEADERS, HEADER_TO_ATTR, _repair_json
 
 logger = logging.getLogger(__name__)
-
+MAX_CONTEXT = 32768  # gpt-4o limit
 NA = "not applicable"
 
 # ── Field lookup: attr → SDRFField ────────────────────────────────────────────
@@ -90,6 +91,35 @@ def _mini_guide(attrs: list[str]) -> str:
             lines.append(f"    Examples: {ex}")
     return "\n".join(lines)
 
+
+def _truncate_text_for_context(paper: PaperJSON, na_attrs: list[str], max_output_tokens: int = 2048) -> tuple[str, str, str]:
+    """
+    Truncate TITLE / ABSTRACT / METHODS to fit model context.
+    Returns (title, abstract, methods) that fit.
+    """
+    enc = encoding_for_model("gpt-4o")
+    
+    title = paper.title
+    abstract = paper.abstract
+    methods = paper.methods
+
+    # Estimate tokens
+    na_text = "\n".join(f"- {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}" for a in na_attrs)
+    guide_text = _mini_guide(na_attrs)
+    fixed_tokens = len(enc.encode(_SYSTEM + na_text + guide_text))
+
+    paper_tokens = len(enc.encode(title + abstract + methods))
+    allowed_tokens = MAX_CONTEXT - max_output_tokens - fixed_tokens
+
+    if paper_tokens <= allowed_tokens:
+        return title, abstract, methods
+
+    # Truncate proportionally (title usually small, abstract ~30%, methods ~70%)
+    ratio = allowed_tokens / paper_tokens
+    abstract_limit = int(len(abstract) * ratio)
+    methods_limit = int(len(methods) * ratio)
+
+    return title, abstract[:abstract_limit], methods[:methods_limit]
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
