@@ -261,7 +261,7 @@ You MUST use EXACT attribute keys (snake_case) listed below:
 Rules:
 - Use ONLY these keys (do not invent new ones)
 - Use "not applicable" only if not relevant to the experiment
-- Already-known values - You may APPEND additional valid values using ; :
+- Already-known values - DO NOT REPLACE with "not applicable!". You may APPEND additional valid values using ; :
   {known_summary}
 
 Return JSON only, no commentary.
