@@ -118,7 +118,10 @@ def run_rules(json_path: Path, rules_dir: Path):
     )
 
     out_csv = rules_dir / json_path.with_suffix(".sdrf.csv").name
-    _write_csv(doc, out_csv)
+    if len(doc.rows) > 0:
+        _write_csv(doc, out_csv)
+    else:
+        logging.warning("Empty document skipping {out_csv}")
     return doc
 
 
