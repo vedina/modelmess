@@ -226,11 +226,14 @@ def build_parser() -> argparse.ArgumentParser:
     # Input
     p.add_argument(
         "input",
+        nargs="?",
+        default=None,
         help=(
             "Paper JSON source. Two forms:\n"
             "  directory/        -> all *.json files in that folder\n"
             "  path/to/file.json -> single file\n"
-            "Use --pattern to filter files inside a directory."
+            "Use --pattern to filter files inside a directory.\n"
+            "Not required when using --dump-prompts."
         ),
     )
     p.add_argument(
@@ -338,6 +341,9 @@ def main() -> None:
     llm_dir     = Path(args.llm_dir)
     fill_from   = Path(args.fill_from) if args.fill_from else None
     deduplicate = not args.no_dedup
+
+    if args.input is None:
+        parser.error("input is required (unless using --dump-prompts)")
 
     # Ensure output dirs exist
     if stage in ("rules", "both"):
