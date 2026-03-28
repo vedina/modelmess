@@ -1,8 +1,6 @@
 # SDRF Extraction Pipeline
 
-Automatically extracts proteomics metadata from scientific paper text and
-outputs a valid **SDRF (Sample and Data Relationship Format)** CSV using any
-OpenAI-compatible LLM.
+The pipeline converts scientific proteomics publications into **SDRF (Sample and Data Relationship Format)** metadata files, which describe the experimental samples, instruments, and conditions behind mass spectrometry datasets in a standardised, machine-readable way. It works in two stages: first, a fast rule-based pass reads the structured paper JSON (title, abstract, and methods section) and uses regex patterns and keyword lookups to deterministically fill fields it can extract with high confidence — organism, tissue, labelling strategy, instrument model, cleavage agent, modifications, and others — writing one row per raw data file (with one row per TMT/iTRAQ channel when multiplexed). Second, an LLM gap-fill pass takes the partially completed SDRF, identifies only the fields still marked "not applicable", and sends those fields together with the relevant paper text to a configurable language model, which returns a targeted patch without touching values the rules already set. The two stages write to separate output folders so rule output is never overwritten, and the LLM stage can be re-run independently against the same rule baseline using different models or prompts — making the pipeline both deterministic at its core and iteratively improvable at the edges.
 
 ---
 
@@ -129,19 +127,27 @@ paths = pipeline.process_batch("papers/", "output/")
 
 ## CLI Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `input` | *(required)* | `.txt` file or directory |
-| `--batch` | off | Process all `.txt` files in directory |
-| `--output` | `<input>.sdrf.csv` | Output path (single mode) |
-| `--output-dir` | `./output/` | Output directory (batch mode) |
-| `--api-key` | `$OPENAI_API_KEY` | LLM API key |
-| `--base-url` | OpenAI default | Base URL for OpenAI-compatible API |
-| `--model` | `gpt-4o` | Model name |
-| `--temperature` | `0.0` | LLM temperature |
-| `--max-tokens` | `8192` | Max response tokens |
-| `--verbose` / `-v` | off | Debug logging |
+```
+# One-time bootstrap (fast, no API cost)
+python main_fill.py papers/ --stage rules --rules-dir output/rules
 
+# Fill with gpt-4o
+python main_fill.py papers/ --stage llm \
+    --fill-from output/rules --llm-dir output/llm_gpt4o \
+    --model gpt-4o --api-key $OPENAI_API_KEY
+
+# Fill same rules with a different model — rules unchanged
+python main_fill.py papers/ --stage llm \
+    --fill-from output/rules --llm-dir output/llm_llama \
+    --model llama3.1:70b --base-url http://localhost:11434/v1 --api-key ollama
+
+# Default (both stages, legacy behaviour)
+python main_fill.py papers/ --api-key $OPENAI_API_KEY
+
+# Single file
+python main_fill.py PXD004010_PubText.json --stage rules --rules-dir output/rules
+
+```
 ---
 
 ## Project Structure
