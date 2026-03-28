@@ -121,7 +121,7 @@ def run_rules(json_path: Path, rules_dir: Path):
     if len(doc.rows) > 0:
         _write_csv(doc, out_csv)
     else:
-        logging.warning("Empty document skipping {out_csv}")
+        logging.warning(f"Empty document skipping {out_csv}")
     return doc
 
 
@@ -222,7 +222,12 @@ def build_parser() -> argparse.ArgumentParser:
     # ── Input ──────────────────────────────────────────────────────────────
     p.add_argument(
         "input",
-        help="Path to a single paper JSON or a directory of paper JSONs.",
+        help=(
+            "Paper JSON source. Three forms accepted:\n"
+            "  directory/          → all *.json files in that folder\n"
+            "  directory/PXD*.json → glob pattern inside a folder\n"
+            "  path/to/file.json   → single file"
+        ),
     )
 
     # ── Stage ─────────────────────────────────────────────────────────────
@@ -297,7 +302,22 @@ def main() -> None:
     inp = Path(args.input)
 
     # ── Collect files ──────────────────────────────────────────────────────
-    if inp.is_dir():
+    inp_str = args.input
+    if any(c in inp_str for c in ("*", "?", "[")):
+        # Glob pattern: split into parent dir + pattern
+        # e.g. "papers/PXD*.json" → parent="papers/", pattern="PXD*.json"
+        inp_path = Path(inp_str)
+        parent = inp_path.parent
+        pattern = inp_path.name
+        if not parent.is_dir():
+            parser.error(f"Directory not found: {parent}")
+        json_files = sorted(parent.glob(pattern))
+        if not json_files:
+            parser.error(f"No files matched pattern '{pattern}' in {parent}")
+        logging.info(
+            "Glob '%s' in %s → %d file(s)", pattern, parent, len(json_files)
+        )
+    elif inp.is_dir():
         json_files = sorted(inp.glob("*.json"))
         if not json_files:
             parser.error(f"No .json files found in {inp}")
