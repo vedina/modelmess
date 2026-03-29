@@ -1,6 +1,11 @@
 # SDRF Extraction Pipeline
 
-The pipeline converts scientific proteomics publications into **SDRF (Sample and Data Relationship Format)** metadata files, which describe the experimental samples, instruments, and conditions behind mass spectrometry datasets in a standardised, machine-readable way. It works in two stages: first, a fast rule-based pass reads the structured paper JSON (title, abstract, and methods section) and uses regex patterns and keyword lookups to deterministically fill fields it can extract with high confidence — organism, tissue, labelling strategy, instrument model, cleavage agent, modifications, and others — writing one row per raw data file (with one row per TMT/iTRAQ channel when multiplexed). Second, an LLM gap-fill pass takes the partially completed SDRF, identifies only the fields still marked "not applicable", and sends those fields together with the relevant paper text to a configurable language model, which returns a targeted patch without touching values the rules already set. The two stages write to separate output folders so rule output is never overwritten, and the LLM stage can be re-run independently against the same rule baseline using different models or prompts — making the pipeline both deterministic at its core and iteratively improvable at the edges.
+The pipeline converts scientific proteomics publications into **SDRF (Sample and Data Relationship Format)** metadata files, which describe the experimental samples, instruments, and conditions behind mass spectrometry datasets in a standardised, machine-readable way. It works in two stages: 
+
+  1. A fast rule-based pass reads the structured paper JSON (title, abstract, and methods section) and uses regex patterns and keyword lookups to deterministically fill fields it can extract with high confidence — organism, tissue, labelling strategy, instrument model, cleavage agent, modifications, and others — writing one row per raw data file (with one row per TMT/iTRAQ channel when multiplexed).
+  2. Second, an LLM gap-fill pass takes the partially completed SDRF, identifies only the fields still marked "not applicable", and sends those fields together with the relevant paper text to a configurable language model, which returns a targeted patch without touching values the rules already set.
+
+The two stages write to separate output folders so rule output is never overwritten, and the LLM stage can be re-run independently against the same rule baseline using different models or prompts — making the pipeline both deterministic at its core and iteratively improvable at the edges.
 
 ---
 
@@ -148,11 +153,13 @@ Single-file mode (batch inferred from directory input)
   python main_fill.py PXD004010_PubText.json --stage both
 ---
 
+```
+
 ## Project Structure
 
-```
+```text
 sdrf_pipeline/
-├── main.py              # CLI entrypoint
+├── main_fill.py              # CLI entrypoint
 ├── requirements.txt
 ├── src/
 │   ├── models.py        # Pydantic SDRFRow + SDRFDocument models
@@ -166,11 +173,11 @@ sdrf_pipeline/
 
 ## Output format
 
-The output CSV matches the SDRF specification with all required columns.
-Fields not extractable from the paper text are filled with `"not applicable"`.
-One row is written per raw MS data file found in the paper.
+The output CSV matches the SDRF format in this [Kaggle competition](https://www.kaggle.com/competitions/harmonizing-the-data-of-your-data)  with all required columns. Fields not extractable from the paper text are filled with `"not applicable"`. 
 
-```
+One row is written per sample. The "rules" phase infers the samples based on file names parsing.
+
+```csv
 D,PXD,Raw Data File,Characteristics[Age],...,Usage
 S,PXD016436,file1.raw,not applicable,...,raw
 S,PXD016436,file2.raw,not applicable,...,raw
