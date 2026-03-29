@@ -116,7 +116,7 @@ Rules:
 - Use ONLY these keys (do not invent new ones)
 - If no evidence was found for a field, OMIT it from the JSON entirely
 - Do NOT include keys with "not applicable" or null values.
-- Already-known values — you may APPEND additional valid values using ";". Do NOT overwrite:
+- Already-known values — DO NOT OVERWRITE. You may APPEND maximum 5 UNIQUE valid values using ";".
   {known_summary}
 
 Return JSON only, no commentary.
