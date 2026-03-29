@@ -145,7 +145,7 @@ def _trim_paper_to_budget(
 
  # Extra headroom beyond the estimate to absorb chars/4 approximation error.
     # Set to 5% of context_limit (minimum 500 tokens).
-    SAFETY_MARGIN = max(500, context_limit // 20)
+    SAFETY_MARGIN = max(750, context_limit // 20)
     
     na_text = "\n".join(
         f"- {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}" for a in na_attrs
@@ -350,7 +350,7 @@ class LLMFillGaps:
             HumanMessage(content=pass1_text),
         ]
         inventory = self._call_llm(messages)
-        logger.debug("Inventory (%d chars): %s…", len(inventory), inventory[:300])
+        logger.info("Inventory (%d chars): %s…", len(inventory), inventory[:30])
 
         # Build pass-2 message: attr list + already-known values
         attr_list = "\n".join(f"- {a}" for a in na_attrs)
