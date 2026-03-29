@@ -348,7 +348,7 @@ class LLMFillGaps:
             HumanMessage(content=pass1_text),
         ]
         inventory = self._call_llm(messages)
-        logger.info("Inventory (%d chars): %s…", len(inventory), inventory[:30])
+        logger.debug("Inventory (%d chars): %s…", len(inventory), inventory[:30])
 
         # Build pass-2 message: attr list + already-known values
         attr_list = "\n".join(f"- {a}" for a in na_attrs)
