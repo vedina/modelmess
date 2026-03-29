@@ -104,7 +104,7 @@ def _count_tokens_approx(text: str) -> int:
 def _trim_paper_to_budget(
     paper: PaperJSON,
     na_attrs: list[str],
-    context_limit: int,
+    context_limit: Optional[int],
     max_output_tokens: int,
     system_prompt: str = "",
 ) -> tuple[str, str, str]:
@@ -123,11 +123,29 @@ def _trim_paper_to_budget(
     Title is always kept whole. Abstract and methods are trimmed
     proportionally if needed.
     """
-    # Extra headroom beyond the estimate to absorb chars/4 approximation error.
-    # Set to 5% of context_limit (minimum 500 tokens).
-    SAFETY_MARGIN = max(500, context_limit // 20)
 
-    na_text    = "\n".join(
+    paper_len = len(paper.methods) + len(paper.abstract) + len(paper.title)
+    logger.info(f"Chars: Paper{paper_len} = M{len(paper.methods)}+A{len(paper.abstract)}+T{len(paper.title)}")
+
+    title    = paper.title
+    abstract = paper.abstract
+    methods  = paper.methods
+
+    title_tokens    = _count_tokens_approx(title)
+    abstract_tokens = _count_tokens_approx(abstract)
+    methods_tokens  = _count_tokens_approx(methods)
+    paper_tokens    = title_tokens + abstract_tokens + methods_tokens
+    logger.info(f"Tokens: Paper{paper_tokens} = M{methods_tokens}+A{abstract_tokens}+T{title_tokens}")
+
+    if context_limit == None:
+         available = float('inf')
+         return title, abstract, methods   
+
+ # Extra headroom beyond the estimate to absorb chars/4 approximation error.
+    # Set to 5% of context_limit (minimum 500 tokens).
+    SAFETY_MARGIN = max(750, context_limit // 20)
+    
+    na_text = "\n".join(
         f"- {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}" for a in na_attrs
     )
     guide_text = _mini_guide(na_attrs)
@@ -140,6 +158,8 @@ def _trim_paper_to_budget(
     )
 
     available = context_limit - max_output_tokens - fixed_tokens
+    logger.info(f"Context limit {context_limit} Available {available} = CT{context_limit}-MT{max_output_tokens}-FT{fixed_tokens}")
+
     if available <= 0:
         logger.warning(
             "Context budget too tight (limit=%d, output=%d, fixed=%d) "
@@ -147,16 +167,7 @@ def _trim_paper_to_budget(
             context_limit, max_output_tokens, fixed_tokens,
         )
         return paper.title, "", ""
-
-    title    = paper.title
-    abstract = paper.abstract
-    methods  = paper.methods
-
-    title_tokens    = _count_tokens_approx(title)
-    abstract_tokens = _count_tokens_approx(abstract)
-    methods_tokens  = _count_tokens_approx(methods)
-    paper_tokens    = title_tokens + abstract_tokens + methods_tokens
-
+    
     if paper_tokens <= available:
         return title, abstract, methods   # fits -- no trimming needed
 
@@ -169,7 +180,7 @@ def _trim_paper_to_budget(
     abstract_chars = int(len(abstract) * ratio)
     methods_chars  = int(len(methods)  * ratio)
 
-    logger.warning(
+    logger.info(
         "Paper text trimmed to fit context (limit=%d tok, margin=%d): "
         "abstract %d->%d chars, methods %d->%d chars.",
         context_limit, SAFETY_MARGIN,
@@ -207,7 +218,7 @@ class LLMFillGaps:
         base_url: Optional[str] = None,
         temperature: float = 0.0,
         max_tokens: int = 2048,
-        context_limit: int = 32_000,
+        context_limit: Optional[int] = None,
         deduplicate: bool = True,
         prompts: Optional[PromptConfig] = None,
         debug: bool = False,
@@ -322,6 +333,7 @@ class LLMFillGaps:
             paper, na_attrs, self.context_limit, self.max_tokens,
             system_prompt=self.prompts.system,
         )
+
         pass1_text = self.prompts.render_pass1(
             field_names=field_names,
             guide=guide,
@@ -336,7 +348,7 @@ class LLMFillGaps:
             HumanMessage(content=pass1_text),
         ]
         inventory = self._call_llm(messages)
-        logger.debug("Inventory (%d chars): %s…", len(inventory), inventory[:300])
+        logger.debug("Inventory (%d chars): %s…", len(inventory), inventory[:30])
 
         # Build pass-2 message: attr list + already-known values
         attr_list = "\n".join(f"- {a}" for a in na_attrs)
@@ -360,6 +372,8 @@ class LLMFillGaps:
 
     def _parse_patch(self, text: str, expected_attrs: list[str]) -> dict[str, str]:
         """Parse the JSON patch response; fall back to empty dict on failure."""
+        logger.info(f"Response received len={len(text)}")
+        logger.debug(text)
         text = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.MULTILINE)
         text = re.sub(r"\s*```\s*$", "", text.strip(), flags=re.MULTILINE)
         text = text.strip()

@@ -41,6 +41,8 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+import json
+
 
 NA = "not applicable"
 
@@ -168,6 +170,11 @@ def run_llm(
     out_csv = llm_dir / json_path.with_suffix(".sdrf.csv").name
     _write_csv(final, out_csv)
 
+    final_dict = final.model_dump(mode="python") 
+    with open(str(out_csv).replace(".csv", ".json"), "w", encoding="utf-8") as f:
+        json.dump(final_dict, f, indent=4, ensure_ascii=False)
+    
+
 
 # -- Per-file dispatcher ------------------------------------------------------
 
@@ -284,10 +291,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--context-limit",
         type=int,
-        default=32_000,
+        default=None,
         metavar="TOKENS",
         help="Context window size in tokens for trimming paper text "
-             "(default: 32000). Examples: 8192 for older models, 128000 for gpt-4o.",
+             "(default: None). Examples: 8192 for older models, 128000 for gpt-4o.",
     )
     p.add_argument("--no-dedup", action="store_true", help="One LLM call per row (disables deduplication).")
 
