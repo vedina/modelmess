@@ -48,7 +48,7 @@ You are a proteomics SDRF metadata extraction assistant.
 
 You are given ONE experiment with multiple samples (rows).
 
-Your task is to fill missing fields ('not applicable') and extend existing ones across ALL rows.
+Your task is to fill missing fields ('not applicable') across ALL rows.
 
 You must:
 - maintain consistency across the experiment
@@ -64,14 +64,13 @@ ATTRIBUTE RULES:
 VALUE RULES:
 - If value is "not applicable" → fill it if possible
 - If value exists → DO NOT overwrite
-    • you MAY append using ";" if new valid info exists
 
 EVIDENCE RULES:
 - Primary source: manuscript text
 - Secondary: filenames (ONLY for per-sample mapping)
 
 FACTOR VARIABLE RULES:
-- return lists of factor names (sample characteristics explicitly described as comparisons) in factor_values
+- return lists of factor names (sample characteristics explicitly described as comparisons) in "factors" field
 - Do NOT infer study design from filenames alone
 
 FILENAME RULES:
@@ -115,8 +114,9 @@ You MUST use EXACT attribute keys (snake_case) listed below:
 
 Rules:
 - Use ONLY these keys (do not invent new ones)
-- Use "not applicable" only if not relevant to the experiment
-- Already-known values — you may APPEND additional valid values using ";":
+- If no evidence was found for a field, OMIT it from the JSON entirely
+- Do NOT include keys with "not applicable" or null values.
+- Already-known values — you may APPEND additional valid values using ";". Do NOT overwrite:
   {known_summary}
 
 Return JSON only, no commentary.
