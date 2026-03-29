@@ -183,5 +183,5 @@ ID,PXD,Raw Data File,Characteristics[Age],...,Usage
 2,PXD016436,file2.raw,not applicable,...,raw
 ```
 
-The pipeline does not merge the SDFR files (as required for Kaggle submission).  There is a separate Jupyter notebook which merges, normalizes (using keyword maps and OLS) and tries to evaluate the submission.
+The pipeline does not merge the SDRF files (as required for Kaggle submission).  There is a separate Jupyter notebook which merges, normalizes (using keyword maps and OLS) and tries to evaluate the submission.
 This is intentional, as the pipeline emerges as a generic solution, and submission format, normalisation and scoring are competition specific.
