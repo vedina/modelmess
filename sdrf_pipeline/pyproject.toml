@@ -1,7 +1,7 @@
 [project]
-name = "files"
+name = "kaggle_sdff"
 version = "0.1.0"
-description = "Add your description here"
+description = "SDRF Extraction Pipeline Rules first then LLM"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
