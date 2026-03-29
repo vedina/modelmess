@@ -1,5 +1,5 @@
 [project]
-name = "kaggle_sdrf"
+name = "kaggle_sdrfmess"
 version = "0.1.0"
 description = "SDRF Extraction Pipeline Rules first then LLM"
 readme = "README.md"
