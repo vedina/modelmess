@@ -41,6 +41,8 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+import json
+
 
 NA = "not applicable"
 
@@ -168,8 +170,9 @@ def run_llm(
     out_csv = llm_dir / json_path.with_suffix(".sdrf.csv").name
     _write_csv(final, out_csv)
 
+    final_dict = final.model_dump(mode="python") 
     with open(str(out_csv).replace(".csv", ".json"), "w", encoding="utf-8") as f:
-        f.write(final.model_dump_json(indent=4, ensure_ascii=False))
+        json.dump(final_dict, f, indent=4, ensure_ascii=False)
     
 
 
