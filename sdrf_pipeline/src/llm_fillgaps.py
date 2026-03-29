@@ -123,9 +123,7 @@ def _trim_paper_to_budget(
     Title is always kept whole. Abstract and methods are trimmed
     proportionally if needed.
     """
-    print(context_limit)
 
-   
     paper_len = len(paper.methods) + len(paper.abstract) + len(paper.title)
     logger.info(f"Chars: Paper{paper_len} = M{len(paper.methods)}+A{len(paper.abstract)}+T{len(paper.title)}")
 
