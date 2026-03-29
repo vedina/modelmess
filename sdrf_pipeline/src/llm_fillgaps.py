@@ -41,6 +41,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
@@ -216,13 +217,21 @@ class LLMFillGaps:
         self.max_tokens = max_tokens
         self.context_limit = context_limit
         self.prompts = prompts if prompts is not None else _DEFAULT_PROMPTS
-        self.llm = ChatOpenAI(
-            api_key=api_key,
-            model=model,
-            base_url=base_url,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        if base_url == "https://api.anthropic.com":
+            self.llm = ChatAnthropic(
+                api_key=api_key,
+                model=model,
+                temperature=temperature,
+                max_tokens_to_sample=max_tokens  # <--- note the rename
+            )            
+        else:
+            self.llm = ChatOpenAI(
+                api_key=api_key,
+                model=model,
+                base_url=base_url,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
         self.debug = debug
 
     # ── Public API ────────────────────────────────────────────────────────
