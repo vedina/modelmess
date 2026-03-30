@@ -58,9 +58,17 @@ _ALL_ATTRS: list[str] = [f.attr for f in FIELDS]
 
 
 def _na_attrs(row: SDRFRow) -> list[str]:
-    """Return attribute names that are still 'not applicable' in a row."""
+    """Return attribute names that are still 'not applicable' in a row.
+
+    'factors' is not in FIELDS (and therefore not in _ALL_ATTRS) but is
+    a plain str field on SDRFRow; we add it manually so the LLM is asked
+    to fill it whenever it is still 'not applicable'.
+    """
     d = row.model_dump()
-    return [a for a in _ALL_ATTRS if d.get(a, NA) == NA]
+    na = [a for a in _ALL_ATTRS if d.get(a, NA) == NA]
+    if d.get("factors", NA) == NA:
+        na.append("factors")
+    return na
 
 
 def _known_summary(row: SDRFRow) -> str:
@@ -348,6 +356,7 @@ class LLMFillGaps:
             HumanMessage(content=pass1_text),
         ]
         inventory = self._call_llm(messages)
+        print(inventory)
         logger.debug("Inventory (%d chars): %s…", len(inventory), inventory[:30])
 
         # Build pass-2 message: attr list + already-known values
@@ -363,8 +372,8 @@ class LLMFillGaps:
             HumanMessage(content=pass2_text),
         ]
         raw = self._call_llm(messages)
-        if self.debug:
-            print("RAW LLM OUTPUT:\n", raw)
+        #if self.debug:
+        print("RAW LLM OUTPUT:\n", raw)
         return self._parse_patch(raw, na_attrs)
 
     def _call_llm(self, messages: list) -> str:
@@ -372,7 +381,7 @@ class LLMFillGaps:
 
     def _parse_patch(self, text: str, expected_attrs: list[str]) -> dict[str, str]:
         """Parse the JSON patch response; fall back to empty dict on failure."""
-        logger.info(f"Response received len={len(text)}")
+        logger.info(f"=============== Response received len={len(text)}")
         logger.debug(text)
         text = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.MULTILINE)
         text = re.sub(r"\s*```\s*$", "", text.strip(), flags=re.MULTILINE)
@@ -392,22 +401,44 @@ class LLMFillGaps:
             return {}
 
         # Keep only attrs we asked for; ignore extras
-        return {
-            k: str(v)
-            for k, v in patch.items()
-            if k in expected_attrs and v not in (None, "")
-        }
+
+        # Always include 'factors' even if not in the N/A list
+        # (it is not in FIELDS so _na_attrs never adds it automatically)
+        if "factors" not in expected_attrs:
+            expected_attrs.append("factors")
+
+        result: dict[str, str] = {}
+        for k, v in patch.items():
+            if k not in expected_attrs:
+                continue
+            # Normalise lists -> semicolon-delimited string
+            # (the LLM sometimes returns lists for multi-value fields like
+            #  factors or temperature; every SDRFRow field is now a plain str)
+            if isinstance(v, list):
+                v = ";".join(str(i) for i in v if i is not None and str(i).strip())
+            else:
+                v = str(v) if v is not None else ""
+            # Skip empty / not-applicable values
+            if not v or v.strip().lower() in ("not applicable", "na", "n/a"):
+                continue
+            result[k] = v
+        logger.debug("Patch factors: %s", result.get("factors"))
+        return result
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _apply_patch(row: SDRFRow, patch: dict[str, str]) -> SDRFRow:
-    """Return a new SDRFRow with patch values applied over existing N/A fields."""
+    """Return a new SDRFRow with patch values applied over existing N/A fields.
+
+    All values in patch are plain strings at this point (lists were already
+    joined to semicolon-delimited strings in _parse_patch).
+    Only writes a value if the field is currently 'not applicable'.
+    """
     if not patch:
         return row
     data = row.model_dump()
     for attr, value in patch.items():
-        # Only overwrite if currently N/A (never overwrite rule-derived values)
         if data.get(attr, NA) == NA and value and value != NA:
             data[attr] = value
     return SDRFRow(**data)

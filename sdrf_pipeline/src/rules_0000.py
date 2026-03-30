@@ -936,10 +936,11 @@ def extract_initial_sdrf(paper: PaperJSON) -> SDRFDocument:
             row = SDRFRow(
                 sample_source=f"source {group_idx * channels + ch_idx + 1}",
                 assay_name=assay,
-                # For fractionated samples, standard SDRF often joins files with ';' 
+                # For fractionated samples, standard SDRF often joins files with ';'
                 # or lists the representative. Here we provide the representative.
                 raw_data_file=";".join(files) if num_fracs_in_group > 1 else rep_file,
-                PXD=paper.pxd,
+                # PXD is not an SDRFRow field; it is written separately
+                # via the ID column in the CSV output.
 
                 alkylation_reagent=alkylation,
                 biological_replicate=bio_rep,
