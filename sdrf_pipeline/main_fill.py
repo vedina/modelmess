@@ -94,7 +94,10 @@ def _write_csv(doc, output_path: Path) -> None:
         writer.writeheader()
         for row in doc.rows:
             d = row.model_dump()
-            writer.writerow({h: d.get(a, NA) for h, a in HEADER_TO_ATTR.items()})
+            writer.writerow({
+                h: (v if (v := d.get(a)) is not None else NA)
+                for h, a in HEADER_TO_ATTR.items()
+            })
     logging.info("Written %d rows -> %s", len(doc.rows), output_path)
 
 

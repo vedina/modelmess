@@ -53,6 +53,21 @@ from src.pipeline import SDRF_HEADERS, HEADER_TO_ATTR, _repair_json
 logger = logging.getLogger(__name__)
 NA = "not applicable"
 
+
+def _is_empty(value) -> bool:
+    """True when a field should be treated as unfilled.
+
+    Handles all forms an empty/default field can take:
+      - Python None     (Pydantic default when no value was set by rules)
+      - "not applicable" (explicit N/A written by rules or a prior pass)
+      - "None"          (None leaked to CSV via str() then read back as string)
+      - empty string
+    """
+    if value is None:
+        return True
+    return str(value).strip().lower() in ("", "not applicable", "none", "na", "n/a")
+
+
 # ── Field lookup: attr → SDRFField ────────────────────────────────────────────
 _ALL_ATTRS: list[str] = [f.attr for f in FIELDS]
 
@@ -65,8 +80,8 @@ def _na_attrs(row: SDRFRow) -> list[str]:
     to fill it whenever it is still 'not applicable'.
     """
     d = row.model_dump()
-    na = [a for a in _ALL_ATTRS if d.get(a, NA) == NA]
-    if d.get("factors", NA) == NA:
+    na = [a for a in _ALL_ATTRS if _is_empty(d.get(a))]
+    if _is_empty(d.get("factors")):
         na.append("factors")
     return na
 
@@ -77,7 +92,7 @@ def _known_summary(row: SDRFRow) -> str:
     pairs = [
         f"{a}={v!r}"
         for a in _ALL_ATTRS
-        if (v := d.get(a, NA)) != NA
+        if not _is_empty(v := d.get(a))
     ]
     return ", ".join(pairs) if pairs else "(nothing known yet)"
 
@@ -268,9 +283,10 @@ class LLMFillGaps:
             writer.writeheader()
             for row in doc.rows:
                 d = row.model_dump()
-                writer.writerow(
-                    {h: d.get(a, NA) for h, a in HEADER_TO_ATTR.items()}
-                )
+                writer.writerow({
+                    h: (v if (v := d.get(a)) is not None else NA)
+                    for h, a in HEADER_TO_ATTR.items()
+                })
         logger.info("SDRF → %s", output_path)
         return output_path
 
@@ -356,8 +372,7 @@ class LLMFillGaps:
             HumanMessage(content=pass1_text),
         ]
         inventory = self._call_llm(messages)
-        print(inventory)
-        logger.debug("Inventory (%d chars): %s…", len(inventory), inventory[:30])
+        logger.debug("Inventory (%d chars): %s…", len(inventory), inventory)
 
         # Build pass-2 message: attr list + already-known values
         attr_list = "\n".join(f"- {a}" for a in na_attrs)
@@ -372,8 +387,8 @@ class LLMFillGaps:
             HumanMessage(content=pass2_text),
         ]
         raw = self._call_llm(messages)
-        #if self.debug:
-        print("RAW LLM OUTPUT:\n", raw)
+        if self.debug:
+            logger.debug("RAW LLM OUTPUT:\n", raw)
         return self._parse_patch(raw, na_attrs)
 
     def _call_llm(self, messages: list) -> str:
@@ -382,7 +397,7 @@ class LLMFillGaps:
     def _parse_patch(self, text: str, expected_attrs: list[str]) -> dict[str, str]:
         """Parse the JSON patch response; fall back to empty dict on failure."""
         logger.info(f"=============== Response received len={len(text)}")
-        logger.debug(text)
+        #logger.debug(text)
         text = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.MULTILINE)
         text = re.sub(r"\s*```\s*$", "", text.strip(), flags=re.MULTILINE)
         text = text.strip()
@@ -439,7 +454,7 @@ def _apply_patch(row: SDRFRow, patch: dict[str, str]) -> SDRFRow:
         return row
     data = row.model_dump()
     for attr, value in patch.items():
-        if data.get(attr, NA) == NA and value and value != NA:
+        if _is_empty(data.get(attr)) and not _is_empty(value):
             data[attr] = value
     return SDRFRow(**data)
 
