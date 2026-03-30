@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Optional
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 
 from src.models import SDRFDocument, SDRFRow
 from src.fields import FIELDS, FIELD_BY_ATTR
@@ -52,6 +52,7 @@ from src.pipeline import SDRF_HEADERS, HEADER_TO_ATTR, _repair_json
 
 logger = logging.getLogger(__name__)
 NA = "not applicable"
+DEBUG_PREFIX = "[llm_fillgaps debug]"
 
 
 def _is_empty(value) -> bool:
@@ -89,15 +90,12 @@ def _na_attrs(row: SDRFRow) -> list[str]:
 def _known_summary(row: SDRFRow) -> str:
     """One-line summary of already-known values for a row (for LLM context)."""
     d = row.model_dump()
-    pairs = [
-        f"{a}={v!r}"
-        for a in _ALL_ATTRS
-        if not _is_empty(v := d.get(a))
-    ]
+    pairs = [f"{a}={v!r}" for a in _ALL_ATTRS if not _is_empty(v := d.get(a))]
     return ", ".join(pairs) if pairs else "(nothing known yet)"
 
 
 # ── Field guide — only for the fields we're asking about ─────────────────────
+
 
 def _mini_guide(attrs: list[str]) -> str:
     """Compact guide covering only the requested attributes."""
@@ -124,6 +122,74 @@ def _count_tokens_approx(text: str) -> int:
     return max(1, len(text) // _CHARS_PER_TOKEN)
 
 
+def _trim_text_to_budget(text: str, token_budget: int) -> str:
+    """Trim text to an approximate token budget using the chars/token heuristic."""
+    if token_budget <= 0:
+        return ""
+    char_budget = token_budget * _CHARS_PER_TOKEN
+    if len(text) <= char_budget:
+        return text
+    return text[:char_budget]
+
+
+def _compact_inventory(text: str) -> str:
+    """Strip bulky evidence quotes from pass-1 output before pass 2."""
+    cleaned_lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("```"):
+            continue
+
+        match = re.match(r'^(.*?)(?:\s*\(SOURCE:\s*".*"\))\s*$', line)
+        cleaned_lines.append(match.group(1) if match else line)
+
+    compact = "\n".join(cleaned_lines).strip()
+    return compact or text.strip()
+
+
+def _prepare_pass2_inventory(
+    inventory: str,
+    system_prompt: str,
+    pass2_text: str,
+    context_limit: Optional[int],
+    max_output_tokens: int,
+) -> str:
+    """Keep pass-2 evidence compact enough for a fresh follow-up request."""
+    inventory = _compact_inventory(inventory)
+    if context_limit is None:
+        return inventory
+
+    safety_margin = max(750, context_limit // 20)
+    fixed_tokens = (
+        _count_tokens_approx(system_prompt)
+        + _count_tokens_approx(pass2_text)
+        + 100
+        + safety_margin
+    )
+    available = context_limit - max_output_tokens - fixed_tokens
+    trimmed = _trim_text_to_budget(inventory, available)
+
+    logger.info(
+        "Pass2 inventory approx tokens %d/%d available",
+        _count_tokens_approx(trimmed),
+        max(0, available),
+    )
+    print(
+        f"{DEBUG_PREFIX} pass2_inventory_tokens~{_count_tokens_approx(trimmed)} "
+        f"available~{max(0, available)} raw_chars={len(inventory)} trimmed_chars={len(trimmed)}",
+        flush=True,
+    )
+
+    if len(trimmed) < len(inventory):
+        logger.info(
+            "Pass2 inventory trimmed %d->%d chars to stay within context budget.",
+            len(inventory),
+            len(trimmed),
+        )
+
+    return trimmed
+
+
 def _trim_paper_to_budget(
     paper: PaperJSON,
     na_attrs: list[str],
@@ -148,26 +214,30 @@ def _trim_paper_to_budget(
     """
 
     paper_len = len(paper.methods) + len(paper.abstract) + len(paper.title)
-    logger.info(f"Chars: Paper{paper_len} = M{len(paper.methods)}+A{len(paper.abstract)}+T{len(paper.title)}")
+    logger.info(
+        f"Chars: Paper{paper_len} = M{len(paper.methods)}+A{len(paper.abstract)}+T{len(paper.title)}"
+    )
 
-    title    = paper.title
+    title = paper.title
     abstract = paper.abstract
-    methods  = paper.methods
+    methods = paper.methods
 
-    title_tokens    = _count_tokens_approx(title)
+    title_tokens = _count_tokens_approx(title)
     abstract_tokens = _count_tokens_approx(abstract)
-    methods_tokens  = _count_tokens_approx(methods)
-    paper_tokens    = title_tokens + abstract_tokens + methods_tokens
-    logger.info(f"Tokens: Paper{paper_tokens} = M{methods_tokens}+A{abstract_tokens}+T{title_tokens}")
+    methods_tokens = _count_tokens_approx(methods)
+    paper_tokens = title_tokens + abstract_tokens + methods_tokens
+    logger.info(
+        f"Tokens: Paper{paper_tokens} = M{methods_tokens}+A{abstract_tokens}+T{title_tokens}"
+    )
 
     if context_limit == None:
-         available = float('inf')
-         return title, abstract, methods   
+        available = float("inf")
+        return title, abstract, methods
 
- # Extra headroom beyond the estimate to absorb chars/4 approximation error.
+    # Extra headroom beyond the estimate to absorb chars/4 approximation error.
     # Set to 5% of context_limit (minimum 500 tokens).
     SAFETY_MARGIN = max(750, context_limit // 20)
-    
+
     na_text = "\n".join(
         f"- {FIELD_BY_ATTR[a].header if a in FIELD_BY_ATTR else a}" for a in na_attrs
     )
@@ -176,41 +246,49 @@ def _trim_paper_to_budget(
     # which underestimates slightly, but the safety margin compensates).
     fixed_tokens = (
         _count_tokens_approx(system_prompt + na_text + guide_text)
-        + 200           # template scaffolding (headers, separators, etc.)
+        + 200  # template scaffolding (headers, separators, etc.)
         + SAFETY_MARGIN
     )
 
     available = context_limit - max_output_tokens - fixed_tokens
-    logger.info(f"Context limit {context_limit} Available {available} = CT{context_limit}-MT{max_output_tokens}-FT{fixed_tokens}")
+    logger.info(
+        f"Context limit {context_limit} Available {available} = CT{context_limit}-MT{max_output_tokens}-FT{fixed_tokens}"
+    )
 
     if available <= 0:
         logger.warning(
             "Context budget too tight (limit=%d, output=%d, fixed=%d) "
             "-- sending title only.",
-            context_limit, max_output_tokens, fixed_tokens,
+            context_limit,
+            max_output_tokens,
+            fixed_tokens,
         )
         return paper.title, "", ""
-    
+
     if paper_tokens <= available:
-        return title, abstract, methods   # fits -- no trimming needed
+        return title, abstract, methods  # fits -- no trimming needed
 
     # Title is always kept whole; trim abstract + methods proportionally.
     remaining = available - title_tokens
     if remaining <= 0:
-        return title[:available * _CHARS_PER_TOKEN], "", ""
+        return title[: available * _CHARS_PER_TOKEN], "", ""
 
     ratio = remaining / (abstract_tokens + methods_tokens)
     abstract_chars = int(len(abstract) * ratio)
-    methods_chars  = int(len(methods)  * ratio)
+    methods_chars = int(len(methods) * ratio)
 
     logger.info(
         "Paper text trimmed to fit context (limit=%d tok, margin=%d): "
         "abstract %d->%d chars, methods %d->%d chars.",
-        context_limit, SAFETY_MARGIN,
-        len(abstract), abstract_chars,
-        len(methods),  methods_chars,
+        context_limit,
+        SAFETY_MARGIN,
+        len(abstract),
+        abstract_chars,
+        len(methods),
+        methods_chars,
     )
     return title, abstract[:abstract_chars], methods[:methods_chars]
+
 
 # ── Default prompts singleton ─────────────────────────────────────────────────
 # Used when LLMFillGaps is constructed without an explicit PromptConfig.
@@ -218,6 +296,7 @@ _DEFAULT_PROMPTS: PromptConfig = PromptConfig.defaults()
 
 
 # ── Main class ────────────────────────────────────────────────────────────────
+
 
 class LLMFillGaps:
     """
@@ -283,10 +362,12 @@ class LLMFillGaps:
             writer.writeheader()
             for row in doc.rows:
                 d = row.model_dump()
-                writer.writerow({
-                    h: (v if (v := d.get(a)) is not None else NA)
-                    for h, a in HEADER_TO_ATTR.items()
-                })
+                writer.writerow(
+                    {
+                        h: (v if (v := d.get(a)) is not None else NA)
+                        for h, a in HEADER_TO_ATTR.items()
+                    }
+                )
         logger.info("SDRF → %s", output_path)
         return output_path
 
@@ -308,7 +389,8 @@ class LLMFillGaps:
 
         logger.info(
             "Deduplicated: %d row(s) → %d unique N/A pattern(s)",
-            len(doc.rows), len(groups),
+            len(doc.rows),
+            len(groups),
         )
 
         patched_rows = list(doc.rows)  # copy
@@ -321,7 +403,8 @@ class LLMFillGaps:
             representative = doc.rows[indices[0]]
             logger.info(
                 "Filling %d field(s) for group of %d row(s)…",
-                len(na_set), len(indices),
+                len(na_set),
+                len(indices),
             )
             patch = self._get_patch(paper, representative, sorted(na_set))
 
@@ -354,7 +437,10 @@ class LLMFillGaps:
             for a in na_attrs
         )
         title, abstract, methods = _trim_paper_to_budget(
-            paper, na_attrs, self.context_limit, self.max_tokens,
+            paper,
+            na_attrs,
+            self.context_limit,
+            self.max_tokens,
             system_prompt=self.prompts.system,
         )
 
@@ -371,8 +457,8 @@ class LLMFillGaps:
             SystemMessage(content=self.prompts.system),
             HumanMessage(content=pass1_text),
         ]
-        inventory = self._call_llm(messages)
-        logger.debug("Inventory (%d chars): %s…", len(inventory), inventory)
+        inventory_raw = self._call_llm(messages)
+        logger.debug("Inventory (%d chars): %s…", len(inventory_raw), inventory_raw)
 
         # Build pass-2 message: attr list + already-known values
         attr_list = "\n".join(f"- {a}" for a in na_attrs)
@@ -380,11 +466,32 @@ class LLMFillGaps:
             attr_list=attr_list,
             known_summary=known,
         )
+        inventory = _prepare_pass2_inventory(
+            inventory_raw,
+            system_prompt=self.prompts.system,
+            pass2_text=pass2_text,
+            context_limit=self.context_limit,
+            max_output_tokens=self.max_tokens,
+        )
+        print(
+            f"{DEBUG_PREFIX} fresh_pass2=1 context_limit={self.context_limit} "
+            f"max_tokens={self.max_tokens} inventory_raw_chars={len(inventory_raw)} "
+            f"inventory_compact_chars={len(inventory)} pass2_chars={len(pass2_text)}",
+            flush=True,
+        )
 
-        # Pass 2: JSON patch (inventory already in context, no paper re-send)
-        messages += [
-            AIMessage(content=inventory),
-            HumanMessage(content=pass2_text),
+        # Pass 2 uses a fresh request so the paper-sized pass-1 prompt is not
+        # carried forward into the context window.
+        messages = [
+            SystemMessage(content=self.prompts.system),
+            HumanMessage(
+                content=(
+                    "Use only the findings below from a previous pass over the paper.\n"
+                    "Do not invent evidence beyond these findings.\n\n"
+                    f"{inventory}\n\n"
+                    f"{pass2_text}"
+                )
+            ),
         ]
         raw = self._call_llm(messages)
         if self.debug:
@@ -404,7 +511,7 @@ class LLMFillGaps:
         try:
             patch = json.loads(text)
         except json.JSONDecodeError:
-            #logger.debug(text)
+            # logger.debug(text)
             logger.warning("JSON parse failed, trying repair…")
             try:
                 patch = json.loads(_repair_json(text))
@@ -444,6 +551,7 @@ class LLMFillGaps:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _apply_patch(row: SDRFRow, patch: dict[str, str]) -> SDRFRow:
     """Return a new SDRFRow with patch values applied over existing N/A fields.
 
@@ -481,19 +589,23 @@ if __name__ == "__main__":
 
     from src.rules_0000 import extract_initial_sdrf
 
-    paper   = PaperJSON.from_file(sys.argv[1])
+    paper = PaperJSON.from_file(sys.argv[1])
     initial = extract_initial_sdrf(paper)
 
-    print(f"Rules filled {sum(1 for r in initial.rows[0].model_dump().values() if r != NA)} "
-          f"fields in row 0. Sending gaps to LLM…")
+    print(
+        f"Rules filled {sum(1 for r in initial.rows[0].model_dump().values() if r != NA)} "
+        f"fields in row 0. Sending gaps to LLM…"
+    )
 
-    api_key  = os.environ.get("OPENAI_API_KEY", "")
+    api_key = os.environ.get("OPENAI_API_KEY", "")
     base_url = os.environ.get("BASE_URL", None)
-    model    = os.environ.get("LLM_MODEL", "gpt-4o")
+    model = os.environ.get("LLM_MODEL", "gpt-4o")
 
     filler = LLMFillGaps(api_key=api_key, base_url=base_url, model=model)
-    final  = filler.fill(paper, initial)
+    final = filler.fill(paper, initial)
 
-    out = sys.argv[2] if len(sys.argv) > 2 else sys.argv[1].replace(".json", ".sdrf.csv")
+    out = (
+        sys.argv[2] if len(sys.argv) > 2 else sys.argv[1].replace(".json", ".sdrf.csv")
+    )
     filler.to_csv(final, out)
     print(f"Written {len(final.rows)} rows → {out}")
