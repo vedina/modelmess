@@ -141,6 +141,7 @@ def run_llm(
     context_limit: int,
     deduplicate: bool,
     prompts,            # PromptConfig or None
+    temperature: int
 ) -> None:
     """
     Run LLM gap-fill for one paper JSON, given a partially-filled SDRFDocument.
@@ -158,6 +159,7 @@ def run_llm(
         context_limit=context_limit,
         deduplicate=deduplicate,
         prompts=prompts,
+        temperature=temperature
     )
     final = filler.fill(paper, rules_doc)
 
@@ -194,6 +196,7 @@ def process_one(
     context_limit: int,
     deduplicate: bool,
     prompts,            # PromptConfig or None
+    temperature: int
 ) -> None:
     stem_csv = json_path.with_suffix(".sdrf.csv").name
 
@@ -220,6 +223,7 @@ def process_one(
             json_path, rules_doc, llm_dir,
             api_key, base_url, model, max_tokens, context_limit, deduplicate,
             prompts,
+            temperature
         )
 
 
@@ -298,6 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Context window size in tokens for trimming paper text "
              "(default: None). Examples: 8192 for older models, 128000 for gpt-4o.",
     )
+    p.add_argument("--temperature", type=int, default=0, help="Temperature (default=0)")
     p.add_argument("--no-dedup", action="store_true", help="One LLM call per row (disables deduplication).")
 
     # Prompts
@@ -351,6 +356,8 @@ def main() -> None:
     fill_from   = Path(args.fill_from) if args.fill_from else None
     deduplicate = not args.no_dedup
 
+    temperature = args.temperature
+
     if args.input is None:
         parser.error("input is required (unless using --dump-prompts)")
 
@@ -392,6 +399,7 @@ def main() -> None:
                 context_limit=args.context_limit,
                 deduplicate=deduplicate,
                 prompts=prompts,
+                temperature = temperature
             )
             ok += 1
         except Exception as e:
