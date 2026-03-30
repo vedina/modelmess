@@ -15,3 +15,7 @@ dependencies = [
 ]
 [tool.setuptools]
 packages = ["modelmess", "sdrf_pipeline"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
