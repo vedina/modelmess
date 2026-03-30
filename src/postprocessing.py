@@ -3,7 +3,7 @@ import pandas as pd
 from collections import defaultdict
 from typing import List, Dict, Set, Optional
 import json
-from .eval import load_sdrf, build_clusters, _string_similarity
+from eval import load_sdrf, build_clusters, _string_similarity
 
 
 def accumulate_unique_per_column_via_load_sdrf(
