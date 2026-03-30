@@ -13,3 +13,5 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "sdrf-pipelines[all]>=0.1.2",
 ]
+[tool.setuptools]
+packages = ["modelmess", "sdrf_pipeline"]
