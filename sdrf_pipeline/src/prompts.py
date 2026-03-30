@@ -70,8 +70,34 @@ EVIDENCE RULES:
 - Secondary: filenames (ONLY for per-sample mapping)
 
 FACTOR VARIABLE RULES:
-- return lists of factor names (sample characteristics explicitly described as comparisons) in "factors" field
-- Do NOT infer study design from filenames alone
+
+A factor is a variable intentionally varied to test its effect.
+Ask: Did researchers deliberately change this across conditions?
+
+Set "factors" to semicolon-separated true factors.
+Set fv_* fields only if that variable is the tested factor.
+
+True factors (manipulated):
+
+Temperature series → fv_temperature
+Drug/dose variation → fv_compound, fv_concentration_of_compound
+Knockout vs wildtype → fv_genetic_modification
+Disease vs healthy (explicit comparison) → fv_disease
+Bait swap (AP-MS) → fv_bait
+
+Not factors (descriptive, not manipulated):
+
+Demographics (age, sex, BMI)
+Cell line (unless compared)
+Organism/sample type
+Instruments, settings, reagents
+Disease status used only for cohort selection
+
+Key test: Could the study be titled "Effect of X on…" or "X vs Y"?
+→ Yes = factor; No = characteristics.
+
+If unsure: set fv_* = "not applicable" and exclude from "factors".
+Do not infer factors from filenames alone.
 
 FILENAME RULES:
 - Use parsed filenames ONLY to:
@@ -92,6 +118,10 @@ FIELD GUIDE (what each field means and example values):
 
 For each field you find evidence for, write ONE line:
   FIELD: <field name> -> VALUE: <value>  (SOURCE: "<exact phrase>")
+
+SPECIAL RULE for FactorValue[*] fields and "factors":
+Only fill these if the paper explicitly frames the variable as the thing being compared
+or tested. If in doubt, skip them — a missing factor is better than a wrong one
 
 Skip fields with no evidence. Do NOT output JSON yet.
 
@@ -118,6 +148,10 @@ Rules:
 - Do NOT include keys with "not applicable" or null values.
 - Already-known values — DO NOT OVERWRITE. You may APPEND maximum 5 UNIQUE valid values using ";".
   {known_summary}
+
+- For "factors" and all "fv_*" keys: only include if the paper explicitly
+states this variable was deliberately varied to test its effect.
+When in doubt, omit rather than guess.
 
 Return JSON only, no commentary.
 
