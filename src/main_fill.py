@@ -208,10 +208,9 @@ def process_one(
             rules_doc = _csv_to_sdrf_doc(candidate)
         else:
             logging.warning(
-                "[llm] Rules CSV not found at %s -- running rules first.", candidate
+                "[llm] Rules CSV not found at %s -- run rules first.", candidate
             )
-            rules_dir.mkdir(parents=True, exist_ok=True)
-            rules_doc = run_rules(json_path, rules_dir)
+            exit(1)
 
     if stage in ("llm", "both"):
         if not api_key:
