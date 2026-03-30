@@ -397,13 +397,14 @@ class LLMFillGaps:
     def _parse_patch(self, text: str, expected_attrs: list[str]) -> dict[str, str]:
         """Parse the JSON patch response; fall back to empty dict on failure."""
         logger.info(f"=============== Response received len={len(text)}")
-        #logger.debug(text)
+        logger.debug(text)
         text = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.MULTILINE)
         text = re.sub(r"\s*```\s*$", "", text.strip(), flags=re.MULTILINE)
         text = text.strip()
         try:
             patch = json.loads(text)
         except json.JSONDecodeError:
+            #logger.debug(text)
             logger.warning("JSON parse failed, trying repair…")
             try:
                 patch = json.loads(_repair_json(text))
