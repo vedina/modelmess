@@ -21,8 +21,8 @@ Key design decisions vs old pipeline.py
 
 Usage
 -----
-    from src.rules_0000 import PaperJSON, extract_initial_sdrf
-    from src.llm_fillgaps import LLMFillGaps
+    from rules_0000 import PaperJSON, extract_initial_sdrf
+    from llm_fillgaps import LLMFillGaps
 
     paper   = PaperJSON.from_file("PXD004010_PubText.json")
     initial = extract_initial_sdrf(paper)
@@ -44,11 +44,11 @@ from typing import Optional
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from src.models import SDRFDocument, SDRFRow
-from src.fields import FIELDS, FIELD_BY_ATTR
-from src.prompts import PromptConfig
-from src.rules_0000 import PaperJSON
-from src.pipeline import SDRF_HEADERS, HEADER_TO_ATTR, _repair_json
+from models import SDRFDocument, SDRFRow
+from fields import FIELDS, FIELD_BY_ATTR
+from prompts import PromptConfig
+from rules_0000 import PaperJSON
+from pipeline import SDRF_HEADERS, HEADER_TO_ATTR, _repair_json
 
 logger = logging.getLogger(__name__)
 NA = "not applicable"
@@ -479,7 +479,7 @@ if __name__ == "__main__":
         )
         sys.exit(1)
 
-    from src.rules_0000 import extract_initial_sdrf
+    from rules_0000 import extract_initial_sdrf
 
     paper   = PaperJSON.from_file(sys.argv[1])
     initial = extract_initial_sdrf(paper)

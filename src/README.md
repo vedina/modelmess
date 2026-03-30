@@ -24,7 +24,7 @@ paper_text (.txt)
          ┌───────────────────────┐
          │  ChatOpenAI           │  ← any OpenAI-compatible API
          │  (configurable model, │    (OpenAI, Ollama, vLLM,
-         │   base_url, api_key)  │     Azure, OpenRouter …)
+         │   base_url, api_key)  │     Azure, OpenRouter …)  
          └───────────┬───────────┘
                      │  JSON response
                      ▼

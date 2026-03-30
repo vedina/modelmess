@@ -23,7 +23,7 @@ are injected automatically at call time — do not remove them:
 
 Loading
 -------
-  from src.prompts import PromptConfig
+  from prompts import PromptConfig
 
   # Built-in defaults (no file needed)
   cfg = PromptConfig.defaults()

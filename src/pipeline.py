@@ -21,8 +21,8 @@ from typing import Optional
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from src.models import SDRFDocument
-from src.fields import (
+from models import SDRFDocument
+from fields import (
     FIELDS,
     HIGH_VALUE_ATTRS,
     build_prompt_field_guide,

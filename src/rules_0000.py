@@ -16,7 +16,7 @@ Do as much as possible without the LLM:
 
 Usage
 -----
-    from src.rules_0000 import PaperJSON, extract_initial_sdrf
+    from rules_0000 import PaperJSON, extract_initial_sdrf
 
     paper = PaperJSON.from_file("PXD004010_PubText.json")
     doc   = extract_initial_sdrf(paper)
@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Optional
 from collections import defaultdict
 
-from src.models import SDRFDocument, SDRFRow
+from models import SDRFDocument, SDRFRow
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1008,7 +1008,7 @@ if __name__ == "__main__":
     out_path = sys.argv[2] if len(sys.argv) > 2 else sys.argv[1].replace(".json", ".sdrf.csv")
 
     # Import column order from pipeline
-    from src.pipeline import SDRF_HEADERS, HEADER_TO_ATTR
+    from pipeline import SDRF_HEADERS, HEADER_TO_ATTR
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=SDRF_HEADERS, extrasaction="ignore")

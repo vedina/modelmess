@@ -64,8 +64,8 @@ def _csv_to_sdrf_doc(csv_path: Path):
     Reload a rules (or any stage) CSV back into an SDRFDocument.
     Needed so the LLM stage can consume previously written rule output.
     """
-    from src.models import SDRFDocument, SDRFRow
-    from src.pipeline import HEADER_TO_ATTR
+    from models import SDRFDocument, SDRFRow
+    from pipeline import HEADER_TO_ATTR
 
     rows = []
     with open(csv_path, newline="", encoding="utf-8") as f:
@@ -86,7 +86,7 @@ def _csv_to_sdrf_doc(csv_path: Path):
 
 
 def _write_csv(doc, output_path: Path) -> None:
-    from src.pipeline import SDRF_HEADERS, HEADER_TO_ATTR
+    from pipeline import SDRF_HEADERS, HEADER_TO_ATTR
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", newline="", encoding="utf-8") as f:
@@ -108,7 +108,7 @@ def run_rules(json_path: Path, rules_dir: Path):
     Run rule-based extraction for one paper JSON.
     Returns the SDRFDocument (also writes it to rules_dir).
     """
-    from src.rules_0000 import PaperJSON, extract_initial_sdrf
+    from rules_0000 import PaperJSON, extract_initial_sdrf
 
     paper = PaperJSON.from_file(json_path)
     doc = extract_initial_sdrf(paper)
@@ -146,8 +146,8 @@ def run_llm(
     Run LLM gap-fill for one paper JSON, given a partially-filled SDRFDocument.
     Writes result to llm_dir.
     """
-    from src.rules_0000 import PaperJSON
-    from src.llm_fillgaps import LLMFillGaps
+    from rules_0000 import PaperJSON
+    from llm_fillgaps import LLMFillGaps
 
     paper = PaperJSON.from_file(json_path)
     filler = LLMFillGaps(
@@ -331,7 +331,7 @@ def main() -> None:
 
     # --dump-prompts: write defaults to file and exit
     if args.dump_prompts:
-        from src.prompts import PromptConfig
+        from prompts import PromptConfig
         out = PromptConfig.defaults().to_toml(args.dump_prompts)
         print(f"Default prompts written to: {out}")
         sys.exit(0)
@@ -342,7 +342,7 @@ def main() -> None:
     # Load prompt config (None -> LLMFillGaps uses defaults internally)
     prompts = None
     if args.prompts:
-        from src.prompts import PromptConfig
+        from prompts import PromptConfig
         prompts = PromptConfig.from_toml(args.prompts)
         logging.info("Loaded prompts from %s", args.prompts)
 
